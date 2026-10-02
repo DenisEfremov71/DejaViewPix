@@ -51,7 +51,7 @@ public enum ToolError: LocalizedError, Sendable, Equatable {
 public struct PhotoTools: ToolExecuting {
     public static let maxLimit = 100
 
-    private let library: any PhotoSearching
+    let library: any PhotoSearching
     private let geocoder: any PlaceGeocoding
     /// Dates in tool inputs and outputs are in this time zone.
     private let timeZone: TimeZone

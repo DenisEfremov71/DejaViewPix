@@ -4,93 +4,32 @@
 //
 
 import AlbumAI
-import OSLog
 import Photos
 import SwiftUI
 
-/// Natural-language search: runs the tool loop and shows each round as it finishes,
-/// then the photos it found.
+/// Natural-language search. Every phase has its own screen, and so does each photo access
+/// state.
 struct PhotoSearchView: View {
-    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
-
     @State private var access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-    @State private var query = ""
-    @State private var rounds: [ToolLoopRound] = []
-    @State private var result: ToolLoopResult?
-    @State private var metrics: QueryMetrics?
-    @State private var errorMessage: String?
-    @State private var searchTask: Task<Void, Never>?
-    @FocusState private var isQueryFocused: Bool
-
-    private static let log = Logger(subsystem: "DejaViewPix", category: "search")
-
-    private static let model = ClaudeModel.haiku
-
-    private let loop = ToolLoop(
-        client: ClaudeClient(model: Self.model, apiKey: { try APIKeyStore.claude.load() }),
-        tools: PhotoTools(library: PhotoLibrary(), geocoder: PlaceGeocoder(), timeZone: .current)
-    )
-
-    private var isSearching: Bool {
-        searchTask != nil
-    }
-
-    private var canSearch: Bool {
-        !isSearching
-            && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && access != .denied && access != .restricted
-    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                accessBanner
-
-                TextField("e.g. photos from Whistler last winter", text: $query, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...4)
-                    .focused($isQueryFocused)
-                    .submitLabel(.search)
-                    .submitOnReturn($query, action: search)
-
-                HStack(spacing: 12) {
-                    Button("Search", action: search)
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!canSearch)
-
-                    if isSearching {
-                        Button("Cancel", role: .cancel) {
-                            searchTask?.cancel()
-                        }
-                        .buttonStyle(.bordered)
-
-                        ProgressView()
+        NavigationStack {
+            Group {
+                switch access {
+                case .notDetermined:
+                    PhotoAccessIntroView {
+                        Task { access = await PHPhotoLibrary.requestAuthorization(for: .readWrite) }
                     }
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                }
-
-                ForEach(rounds, id: \.number, content: roundView)
-
-                if let result {
-                    resultView(result)
-                }
-
-                if let metrics {
-                    Text(Self.metricsLabel(metrics))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                case .denied, .restricted:
+                    PhotoAccessBlockedView(status: access)
+                default:
+                    SearchScreen(isLimited: access == .limited)
                 }
             }
-            .padding()
+            .navigationTitle("Deja View Pix")
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .dismissesKeyboardOnTap($isQueryFocused)
         .onChange(of: scenePhase) { _, phase in
             // The user may have changed access in Settings.
             if phase == .active {
@@ -98,118 +37,250 @@ struct PhotoSearchView: View {
             }
         }
     }
+}
 
-    // MARK: - Photo access
+private struct SearchScreen: View {
+    let isLimited: Bool
+
+    @State private var model = SearchModel()
+    @State private var query = ""
+    @State private var submission: Submission?
+    @FocusState private var isQueryFocused: Bool
+
+    private struct Submission: Equatable {
+        let id = UUID()
+        let text: String
+    }
+
+    private static let suggestions = [
+        "photos from Whistler last winter",
+        "my favorite videos",
+        "photos from last month",
+        "screenshots from this year",
+    ]
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var phaseKind: Int {
+        switch model.phase {
+        case .idle: 0
+        case .searching: 1
+        case .results: 2
+        case .empty: 3
+        case .failed: 4
+        }
+    }
+
+    private var isSearching: Bool {
+        if case .searching = model.phase { true } else { false }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if isLimited {
+                    LimitedAccessBanner()
+                }
+                searchField
+                phaseView
+                    // Animate moving between screens, not edits within one: a removed chip
+                    // should update the grid at once.
+                    .animation(.default, value: phaseKind)
+                if !isSearching, !model.rounds.isEmpty {
+                    SearchDetailsView(rounds: model.rounds, metrics: model.metrics)
+                }
+            }
+            .padding()
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .dismissesKeyboardOnTap($isQueryFocused)
+        // A new submission cancels the previous search; clearing it is Cancel.
+        .task(id: submission) {
+            guard let submission else { return }
+            await model.search(submission.text, submission: submission.id)
+        }
+    }
+
+    // MARK: - Search field
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("Describe the photos you want", text: $query, axis: .vertical)
+                .lineLimit(1...4)
+                .focused($isQueryFocused)
+                .submitLabel(.search)
+                .submitOnReturn($query, action: submit)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                    isQueryFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear")
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: 12))
+    }
+
+    private func submit() {
+        isQueryFocused = false
+        guard !trimmedQuery.isEmpty else { return }
+        submission = Submission(text: trimmedQuery)
+    }
+
+    // MARK: - Phases
 
     @ViewBuilder
-    private var accessBanner: some View {
-        switch access {
-        case .authorized:
-            EmptyView()
-        case .notDetermined:
-            banner("Deja View Pix needs access to your photos to search them.") {
-                Button("Allow Access") {
-                    Task { await requestAccess() }
+    private var phaseView: some View {
+        switch model.phase {
+        case .idle:
+            suggestionsView
+
+        case .searching(let status):
+            HStack(spacing: 12) {
+                ProgressView()
+                Text(status)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.opacity)
+                    .accessibilityAddTraits(.updatesFrequently)
+                Spacer(minLength: 0)
+                Button("Cancel", role: .cancel) { submission = nil }
+                    .buttonStyle(.bordered)
+            }
+            .padding(.vertical, 8)
+
+        case .results(let outcome):
+            VStack(alignment: .leading, spacing: 12) {
+                header(outcome)
+                PhotoGrid(photos: outcome.photos, filters: outcome.filters)
+                    .opacity(model.isUpdating ? 0.6 : 1)
+            }
+
+        case .empty(let outcome):
+            VStack(alignment: .leading, spacing: 12) {
+                header(outcome)
+                ContentUnavailableView(
+                    "No Matching Photos",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text(outcome.filters.isEmpty
+                        ? "Try describing the photos another way."
+                        : "Remove a filter to widen the search.")
+                )
+            }
+
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Search Didn't Finish", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            } actions: {
+                if let submission {
+                    Button("Try Again") { self.submission = Submission(text: submission.text) }
+                        .buttonStyle(.borderedProminent)
                 }
             }
-        case .limited:
-            banner("Limited access: only the photos you selected are searched.") {
-                Button("Change in Settings", action: openSettings)
-            }
-        case .denied:
-            banner("Photo access is off, so there is nothing to search. Turn it on in Settings.") {
-                Button("Open Settings", action: openSettings)
-            }
-        case .restricted:
-            banner("Photo access is restricted on this device, for example by Screen Time, and can't be changed here.") {
-                EmptyView()
-            }
-        @unknown default:
-            banner("Unknown photo access state.") { EmptyView() }
         }
     }
 
-    private func banner(_ message: String, @ViewBuilder action: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(message)
-            action()
+    private var suggestionsView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Try")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ForEach(Self.suggestions, id: \.self) { suggestion in
+                Button {
+                    query = suggestion
+                    submit()
+                } label: {
+                    Label(suggestion, systemImage: "sparkle.magnifyingglass")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    /// The summary (or a note that the user's edits replaced it), the chips and the count.
+    private func header(_ outcome: SearchModel.Outcome) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let summary = outcome.summary {
+                Text(summary)
+                    .textSelection(.enabled)
+            } else {
+                Label("Filters edited. Searched on your iPhone, without Claude.", systemImage: "slider.horizontal.3")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            let chips = outcome.filters.chips
+            if !chips.isEmpty {
+                FilterChipsView(chips: chips) { old, new in
+                    model.edit(old, to: new)
+                }
+            }
+
+            if !outcome.photos.isEmpty {
+                Text(countLabel(outcome))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func countLabel(_ outcome: SearchModel.Outcome) -> String {
+        let count = outcome.photos.count
+        let noun = count == 1 ? "photo" : "photos"
+        return outcome.hasMore ? "Showing the first \(count) \(noun). More match." : "\(count) \(noun)"
+    }
+}
+
+/// The round-by-round trace and cost of the last query, for debugging and the Day 8
+/// model comparison.
+private struct SearchDetailsView: View {
+    let rounds: [ToolLoopRound]
+    let metrics: QueryMetrics?
+
+    var body: some View {
+        DisclosureGroup("Details") {
+            VStack(alignment: .leading, spacing: 8) {
+                if let metrics {
+                    Text(Self.metricsLabel(metrics))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(rounds, id: \.number, content: roundView)
+            }
+            .padding(.top, 8)
         }
         .font(.footnote)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(.orange.opacity(0.15), in: .rect(cornerRadius: 8))
     }
-
-    private func requestAccess() async {
-        access = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-    }
-
-    private func openSettings() {
-        if let url = URL(string: UIApplication.openSettingsURLString) {
-            openURL(url)
-        }
-    }
-
-    // MARK: - Searching
-
-    private func search() {
-        isQueryFocused = false
-        guard canSearch else { return }
-        let query = query
-        rounds = []
-        result = nil
-        metrics = nil
-        errorMessage = nil
-
-        searchTask = Task {
-            defer { searchTask = nil }
-
-            if access == .notDetermined {
-                await requestAccess()
-            }
-            guard access == .authorized || access == .limited else {
-                errorMessage = "Photo access is needed to search."
-                return
-            }
-
-            let system = SearchPrompt.system(now: .now, timeZone: .current)
-            let clock = ContinuousClock()
-            let start = clock.now
-            let outcome: String
-            do {
-                let result = try await loop.run(query, system: system) { @MainActor round in
-                    rounds.append(round)
-                    for call in round.toolCalls {
-                        Self.log.debug("""
-                            round \(round.number) \(call.name)(\(call.input.jsonString)) \
-                            → \(call.output.isError ? "ERROR " : "")\(call.output.content)
-                            """)
-                    }
-                }
-                self.result = result
-                outcome = "ok, \(result.answer.photoIDs.count) photos"
-            } catch is CancellationError {
-                errorMessage = "Search cancelled."
-                outcome = "cancelled"
-            } catch {
-                errorMessage = error.localizedDescription
-                outcome = "error: \(error.localizedDescription)"
-            }
-
-            // One usage line per query, failed ones included: they cost money too.
-            let metrics = QueryMetrics(model: Self.model.rawValue, rounds: rounds, latency: start.duration(to: clock.now))
-            self.metrics = metrics
-            Self.log.notice("search \(query, privacy: .private) · \(metrics.logLine(outcome: outcome), privacy: .public)")
-        }
-    }
-
-    // MARK: - Trace and results
 
     private func roundView(_ round: ToolLoopRound) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Round \(round.number) · \(Self.format(round.latency)) · \(round.usage.inputTokens) in / \(round.usage.outputTokens) out · \(round.stopReason ?? "—")")
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
+
+            if round.toolCalls.isEmpty {
+                // Claude answered in prose; the loop asked it to call present_results.
+                if !round.text.isEmpty {
+                    Text(Self.truncated(round.text))
+                        .font(.caption)
+                        .italic()
+                }
+                Text("→ no tool call; asked for present_results")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.orange)
+            }
 
             ForEach(round.toolCalls, id: \.id) { call in
                 VStack(alignment: .leading, spacing: 2) {
@@ -219,32 +290,12 @@ struct PhotoSearchView: View {
                         .font(.caption2.monospaced())
                         .foregroundStyle(call.output.isError ? .red : .secondary)
                 }
-                .textSelection(.enabled)
             }
         }
+        .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.quaternary, in: .rect(cornerRadius: 8))
-    }
-
-    private func resultView(_ result: ToolLoopResult) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(result.answer.summary)
-                .textSelection(.enabled)
-
-            // Rebuilt from the searches that ran, not from the model's description.
-            ForEach(Array(result.answer.filters.enumerated()), id: \.offset) { _, filters in
-                Label(filters.label, systemImage: "line.3.horizontal.decrease.circle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 4)], spacing: 4) {
-                ForEach(result.answer.photoIDs, id: \.self) { id in
-                    AssetThumbnail(id: id)
-                }
-            }
-        }
     }
 
     nonisolated private static func metricsLabel(_ metrics: QueryMetrics) -> String {
@@ -259,52 +310,6 @@ struct PhotoSearchView: View {
 
     nonisolated private static func truncated(_ text: String, limit: Int = 300) -> String {
         text.count <= limit ? text : text.prefix(limit) + "…"
-    }
-}
-
-/// A square thumbnail for a PHAsset local identifier.
-struct AssetThumbnail: View {
-    let id: String
-    @State private var image: UIImage?
-    @Environment(\.displayScale) private var displayScale
-
-    var body: some View {
-        Rectangle()
-            .fill(.quaternary)
-            .aspectRatio(1, contentMode: .fit)
-            .overlay {
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                }
-            }
-            .clipped()
-            .task(id: id) {
-                image = await Self.load(id, side: 80 * displayScale)
-            }
-    }
-
-    private static func load(_ id: String, side: CGFloat) async -> UIImage? {
-        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
-            return nil
-        }
-        let options = PHImageRequestOptions()
-        // One callback with the final image, so the continuation resumes exactly once.
-        options.deliveryMode = .highQualityFormat
-        options.resizeMode = .fast
-        options.isNetworkAccessAllowed = true
-
-        return await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(width: side, height: side),
-                contentMode: .aspectFill,
-                options: options
-            ) { image, _ in
-                continuation.resume(returning: image)
-            }
-        }
     }
 }
 

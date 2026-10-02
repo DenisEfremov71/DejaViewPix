@@ -95,6 +95,25 @@ public struct PhotoLibrary: PhotoSearching {
         return albums
     }
 
+    /// Details for the grid, in the order of `ids`. IDs that no longer exist are left out.
+    /// Runs off the main actor, like every PhotoKit fetch here.
+    public func details(for ids: [String]) async -> [PhotoDetails] {
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+        var byID: [String: PhotoDetails] = [:]
+        assets.enumerateObjects { asset, _, _ in
+            byID[asset.localIdentifier] = PhotoDetails(
+                id: asset.localIdentifier,
+                creationDate: asset.creationDate,
+                isVideo: asset.mediaType == .video,
+                isFavorite: asset.isFavorite,
+                duration: asset.duration,
+                latitude: asset.location?.coordinate.latitude,
+                longitude: asset.location?.coordinate.longitude
+            )
+        }
+        return ids.compactMap { byID[$0] }
+    }
+
     // MARK: - Helpers
 
     /// Everything except location goes into the predicate, so PhotoKit does the filtering.

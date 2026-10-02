@@ -23,7 +23,7 @@ public struct SearchAnswer: Sendable, Equatable {
 }
 
 /// The filters of one `search_photos` call, with defaults filled in.
-public struct AppliedFilters: Sendable, Equatable {
+public struct AppliedFilters: Sendable, Hashable {
     public var dateFrom: String?
     public var dateTo: String?
     /// "photo" or "video"; nil means both.
@@ -166,7 +166,13 @@ extension SearchAnswer {
     }
 
     static func appliedFilters(of search: ToolCallRecord, geocodes calls: [ToolCallRecord]) -> AppliedFilters? {
-        guard let input = try? search.input.decode(as: PhotoTools.SearchPhotosInput.self) else {
+        appliedFilters(input: search.input, geocodes: calls)
+    }
+
+    /// The filters a `search_photos` input asks for, with defaults filled in. Nil if the input
+    /// doesn't decode.
+    static func appliedFilters(input json: JSONValue, geocodes calls: [ToolCallRecord]) -> AppliedFilters? {
+        guard let input = try? json.decode(as: PhotoTools.SearchPhotosInput.self) else {
             return nil
         }
 

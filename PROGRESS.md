@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 4 ✅ done (2026-10-02).** Next: **Day 5: The SwiftUI experience.**
+**Day 5 ✅ done (2026-10-02).** Next: **Day 6.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -159,8 +159,62 @@
 
 The filters shown to the user are rebuilt from the tool calls that ran, not taken from the model's description of what it did.
 
+## Day 5: The SwiftUI experience (done 2026-10-02)
+
+**Built**
+- Package:
+  - `ToolLoop.run(onToolStart:)` fires before each tool runs. It sits after `onRound`, so a single trailing closure still binds to `onRound`.
+  - `ToolCallStart.statusLine()` turns a tool call into a status line:
+    - "Finding Tofino…" for `geocode_place`
+    - "Searching favorite videos from July–August 2025 near Tofino…" for `search_photos`, with the place named from the earlier `geocode_place` result
+    - "Checking your albums…" and "Putting your results together…" for the other two tools
+  - `DateRangeText` formats whole months, years, single days, ranges and open ranges. Bounds are inclusive and the calendar is UTC.
+  - `FilterChip` (dates, place + radius, media type, favorites, album, oldest first) with `label` and `systemImage`. `AppliedFilters.chips` lists them, and `[AppliedFilters].replacing(_:with:)` removes or edits a chip in every search that has it, then drops searches that became identical.
+  - `PhotoTools.search([AppliedFilters])` re-runs the filters on the library with no model call. It uses the same validation as the tool, and an empty filter list means the whole library.
+  - `PhotoLibrary.details(for:)` returns a `PhotoDetails` (date, video/favorite, duration, location) per ID, off the main actor.
+  - `[AppliedFilters].placeName(latitude:longitude:)` names the place for VoiceOver without reverse geocoding.
+- App:
+  - `SearchModel` is `@Observable`, with `Phase`: idle, searching(status), results, empty, failed.
+    - A generation counter keeps stale searches and edits from overwriting newer state.
+    - `finishedSubmission` stops `.task(id:)` from paying for a search again when the screen reappears.
+  - `PhotoSearchView`:
+    - The access state picks the screen. Searches run through `.task(id: submission)`: a new submission cancels the old search, and Cancel sets it to nil.
+    - Idle shows suggestions. Searching shows the status line and Cancel. Empty and Failed have their own screens.
+    - A "Details" section shows the round trace (including prose rounds) and the cost.
+  - `FilterChipsView`:
+    - Tapping a chip opens a menu: change dates (sheet), radius picker, photos ↔ videos, or remove. The × removes in one tap.
+    - Chips sit in a custom `FlowLayout`, so they wrap at large Dynamic Type sizes.
+    - After an edit, the summary is replaced by "Filters edited. Searched on your iPhone, without Claude."
+  - `PhotoGrid`:
+    - A `LazyVGrid` with about 110 pt columns (at least 3), and a target size in pixels that matches the cell.
+    - `ThumbnailLoader` is a nonisolated class around `PHCachingImageManager`. Its asset fetches are `@concurrent`, it caches the whole result set, and it delivers images opportunistically (a quick low-quality one, then the final one) through an `AsyncStream`.
+    - Each cell runs one `.task(id: photo + size)`; cancelling it cancels the PhotoKit request, so a late image can't land in a reused cell.
+    - VoiceOver label: "Photo, February 7, 2026 at 1:15 PM, near Whistler".
+  - Permission flow:
+    - An intro screen before the system prompt, explaining what Claude sees: the query plus the IDs, dates and distances of matching photos, never the photos themselves.
+    - A designed denied screen with Open Settings, and a restricted screen.
+    - A limited-access banner with "Select More Photos" (`presentLimitedLibraryPicker`).
+- 87 tests. New ones cover date range text, status lines (including the order the loop reports them in), chips, replacing and merging chips, place names, and local re-runs (the query sent to the library, merging, the whole library).
+
+**Verified (iPhone 17 simulator):**
+- "photos from Whistler last winter": status lines "Reading your request…", "Finding Whistler…", …, then the summary, chips "December 2025–February 2026" and "Whistler · 15 km", and 3 thumbnails with VoiceOver labels.
+- Removing the date chip showed 4 photos at once. The console logged `filters edited · 4 photos · no model call`.
+- "my favorite videos" showed the empty screen with Videos and Favorites chips. Removing Favorites and switching Videos to Photos showed all 15 photos, with no model call.
+- The intro and denied screens look right. At the largest accessibility text size, the chips wrap without truncation.
+- `swift test` passes, and the app builds without warnings.
+
+**Verified on a real iPhone:** the user ran it on their own iPhone against the device checklist (smooth grid, instant chip edits, every access state) and reported that it works.
+
+**Decisions**
+- Edits re-run the filters locally instead of asking Claude again. It's instant and free, and the user stays in control. Claude's summary is hidden after an edit, because it no longer describes what's shown.
+- Only changes between phases animate. Edits within the results update the grid immediately; a crossfade made them look slow.
+- Status lines come from tool inputs, not the model's text. Text shown alongside a tool call can claim things that haven't happened.
+
+**Interview answer:** "Why do you show the parsed filters to the user instead of just the results?" Because the model can misread the query, and an unexplained grid hides that. Chips make the interpretation visible: "December 2024–February 2025 · Whistler · 15 km" tells the user at once that "last winter" was read as the wrong year. They also make it fixable in one tap without another model call, which costs nothing and takes no time. That builds trust: the user sees what the app did and stays in control, rather than wondering why their photos are missing.
+
 ## Open items
 
-- A round that ends in prose has no tool calls, so the trace shows no line for it (round 2 of "my favorite videos"). Show the prose and the nudge in the trace, maybe as part of Day 5.
+- Haiku once read "last winter" as December 2024–February 2025 (on 2026-10-02 the answer is December 2025–February 2026); another run of the same query got it right. Add this to the evals, and consider computing the season's dates in the system prompt.
+- Switching tabs mid-search cancels the search (`.task` ends when the view disappears) and runs it again when the user returns. That's acceptable, but it could keep running instead.
 - The bundle ID changed to `com.denisefremov.DejaViewPix` (commit `15bd751`). Simulators and devices that had the old build need photo access granted again and the API key re-entered, because Keychain items belong to the app ID. The iPhone 17 simulator (9D3D28C2…) has the seeded photos, photo access and the key.
 - Before Day 8 (comparing models): Opus 5.5 and Sonnet 5.5 always think, and their replies contain `thinking` blocks. `ContentBlock` decodes those as `.unknown`, which can't be encoded, so the second request of a tool loop would fail on those models. Keep unknown blocks as raw JSON and send them back unchanged.

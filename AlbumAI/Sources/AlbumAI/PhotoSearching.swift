@@ -61,7 +61,7 @@ public struct PhotoQuery: Sendable, Equatable {
     }
 }
 
-public struct GeoCircle: Sendable, Equatable {
+public struct GeoCircle: Sendable, Hashable {
     public var latitude: Double
     public var longitude: Double
     public var radiusMeters: Double
@@ -158,4 +158,34 @@ public struct Place: Sendable, Equatable {
     }
 
     public var radiusMeters: Double { kind.radiusMeters }
+}
+
+/// What the app needs to show one photo: enough for the grid badges and a VoiceOver label.
+public struct PhotoDetails: Sendable, Equatable, Identifiable {
+    public var id: String
+    public var creationDate: Date?
+    public var isVideo: Bool
+    public var isFavorite: Bool
+    /// Video length in seconds; 0 for photos.
+    public var duration: Double
+    public var latitude: Double?
+    public var longitude: Double?
+
+    public init(
+        id: String,
+        creationDate: Date? = nil,
+        isVideo: Bool = false,
+        isFavorite: Bool = false,
+        duration: Double = 0,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) {
+        self.id = id
+        self.creationDate = creationDate
+        self.isVideo = isVideo
+        self.isFavorite = isFavorite
+        self.duration = duration
+        self.latitude = latitude
+        self.longitude = longitude
+    }
 }

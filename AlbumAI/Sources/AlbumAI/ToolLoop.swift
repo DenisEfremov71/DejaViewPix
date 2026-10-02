@@ -124,12 +124,16 @@ public struct ToolLoop: Sendable {
         self.maxRounds = maxRounds
     }
 
-    /// - Parameter onRound: Called after each round, including the last one before an error,
-    ///   so callers can log usage for failed searches too.
+    /// - Parameters:
+    ///   - onRound: Called after each round, including the last one before an error, so
+    ///     callers can log usage for failed searches too. A single trailing closure binds here.
+    ///   - onToolStart: Called before each tool call runs, present_results included, so the
+    ///     app can say what is happening.
     public func run(
         _ query: String,
         system: String,
-        onRound: @Sendable (ToolLoopRound) async -> Void = { _ in }
+        onRound: @Sendable (ToolLoopRound) async -> Void = { _ in },
+        onToolStart: @Sendable (ToolCallStart) async -> Void = { _ in }
     ) async throws -> ToolLoopResult {
         var messages: [Message] = [.user(query)]
         var rounds: [ToolLoopRound] = []
@@ -182,6 +186,7 @@ public struct ToolLoop: Sendable {
             // One tool_result per tool_use, in the same order, all in one user message.
             var results: [ContentBlock] = []
             for call in response.toolUses {
+                await onToolStart(ToolCallStart(name: call.name, input: call.input, earlierCalls: calls))
                 let output: ToolOutput
                 if call.name == SearchAnswer.toolName {
                     guard response.toolUses.count == 1 else {
