@@ -7,81 +7,6 @@
 
 import Foundation
 
-struct Message: Encodable {
-    let role: String
-    let content: String
-}
-
-struct MessageRequest: Encodable {
-    let model: String
-    let maxTokens: Int
-    let messages: [Message]
-
-    private enum CodingKeys: String, CodingKey {
-        case model, messages
-        case maxTokens = "max_tokens"
-    }
-}
-
-struct ContentBlock: Decodable {
-    let type: String
-    let text: String?
-}
-
-struct Usage: Decodable {
-    let inputTokens: Int
-    let outputTokens: Int
-
-    private enum CodingKeys: String, CodingKey {
-        case inputTokens = "input_tokens"
-        case outputTokens = "output_tokens"
-    }
-}
-
-struct MessageResponse: Decodable {
-    let content: [ContentBlock]
-    let stopReason: String?
-    let usage: Usage
-
-    private enum CodingKeys: String, CodingKey {
-        case content, usage
-        case stopReason = "stop_reason"
-    }
-}
-
-struct APIErrorResponse: Decodable {
-    let error: Detail
-
-    struct Detail: Decodable {
-        let type: String
-        let message: String
-    }
-}
-
-public enum ClaudeError: LocalizedError {
-    case http(status: Int, type: String?, message: String?)
-    case invalidResponse
-    case noTextContent
-
-    public var errorDescription: String? {
-        switch self {
-        case .http(let status, let type, let message):
-            if let message {
-                let typeLabel = type.map { ", \($0)" } ?? ""
-                return
-                    "Claude API error (HTTP \(status)\(typeLabel)): \(message)"
-            }
-            return "Claude API returned HTTP \(status) with no error details."
-
-        case .invalidResponse:
-            return "Unexpected response from the server (not an HTTP response)."
-
-        case .noTextContent:
-            return "Claude responded, but the reply contained no text."
-        }
-    }
-}
-
 public enum ClaudeModel: String, Sendable {
     case haiku = "claude-haiku-4-5-20251001"
     case sonnet = "claude-sonnet-5-5"
@@ -89,101 +14,110 @@ public enum ClaudeModel: String, Sendable {
     case nonexisting = "claude-nope"
 }
 
-public struct ClaudeClient: Sendable {
-    public var model: ClaudeModel
-    public var maxTokens: Int
-    public var session: URLSession
+/// A successful reply plus the metrics for the call.
+public struct ClaudeReply: Sendable, Equatable {
+    public var text: String
+    public var stopReason: String?
+    public var usage: Usage
+    public var latency: Duration
+    public var requestID: String?
+}
+
+public actor ClaudeClient {
+    public let model: ClaudeModel
+    public let maxTokens: Int
+    public let system: String?
+    private let session: URLSession
 
     /// Returns the API key. Called on every request, so the key is never stored in the client.
     private let apiKey: @Sendable () throws -> String
 
-    private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private static let apiVersion = "2023-06-01"
+    static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    static let apiVersion = "2023-06-01"
 
     public init(
         model: ClaudeModel = .haiku,
         maxTokens: Int = 1024,
+        system: String? = nil,
         session: URLSession = .shared,
         apiKey: @escaping @Sendable () throws -> String
     ) {
         self.model = model
         self.maxTokens = maxTokens
+        self.system = system
         self.session = session
         self.apiKey = apiKey
     }
 
-    private func makeRequest(prompt: String) throws -> URLRequest {
-        let apiKey = try apiKey()
-
+    public func send(_ prompt: String) async throws -> ClaudeReply {
         let body = MessageRequest(
             model: model.rawValue,
             maxTokens: maxTokens,
-            messages: [Message(role: "user", content: prompt)]
+            system: system,
+            messages: [.user(prompt)]
         )
+        let request = try Self.makeURLRequest(body: body, apiKey: apiKey())
 
+        let clock = ContinuousClock()
+        let start = clock.now
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        }
+        let latency = start.duration(to: clock.now)
+
+        try Task.checkCancellation()
+        return try Self.makeReply(data: data, response: response, latency: latency)
+    }
+
+    static func makeURLRequest(body: MessageRequest, apiKey: String) throws -> URLRequest {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 60
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue(
-            Self.apiVersion,
-            forHTTPHeaderField: "anthropic-version"
-        )
+        request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = try JSONEncoder().encode(body)
-
         return request
     }
 
-    public func send(_ prompt: String) async throws -> String {
-        let request = try makeRequest(prompt: prompt)
-        let (data, response) = try await session.data(for: request)
-
+    static func makeReply(data: Data, response: URLResponse, latency: Duration) throws -> ClaudeReply {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ClaudeError.invalidResponse
         }
 
-        #if DEBUG
-            if let requestID = httpResponse.value(
-                forHTTPHeaderField: "request-id"
-            ) {
-                print("[Claude] request-id: \(requestID)")
-            }
-        #endif
+        let requestID = httpResponse.value(forHTTPHeaderField: "request-id")
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let apiError = try? JSONDecoder().decode(
-                APIErrorResponse.self,
-                from: data
-            )
+            let apiError = try? JSONDecoder().decode(APIErrorResponse.self, from: data)
+            let retryAfter = httpResponse.value(forHTTPHeaderField: "retry-after")
+                .flatMap { Double($0) }
+                .map { Duration.seconds($0) }
             throw ClaudeError.http(
                 status: httpResponse.statusCode,
                 type: apiError?.error.type,
-                message: apiError?.error.message
+                message: apiError?.error.message,
+                requestID: requestID,
+                retryAfter: retryAfter
             )
         }
 
         let decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
-
-        #if DEBUG
-            print(
-                "[Claude] stop_reason: \(decoded.stopReason ?? "nil"), tokens in/out: \(decoded.usage.inputTokens)/\(decoded.usage.outputTokens)"
-            )
-        #endif
-
-        let text = decoded.content
-            .filter { $0.type == "text" }
-            .compactMap(\.text)
-            .joined(separator: "\n")
+        let text = decoded.text
 
         guard !text.isEmpty else {
-            throw ClaudeError.noTextContent
+            throw ClaudeError.noTextContent(stopReason: decoded.stopReason)
         }
 
-        if decoded.stopReason == "max_tokens" {
-            return text + "\n\n(Reply truncated: reached the max_tokens limit.)"
-        }
-
-        return text
+        return ClaudeReply(
+            text: text,
+            stopReason: decoded.stopReason,
+            usage: decoded.usage,
+            latency: latency,
+            requestID: requestID
+        )
     }
 }

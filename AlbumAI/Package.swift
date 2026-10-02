@@ -13,5 +13,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "AlbumAI"),
+        .testTarget(name: "AlbumAITests", dependencies: ["AlbumAI"]),
     ]
 )

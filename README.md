@@ -2,16 +2,24 @@
 
 An iOS app built with SwiftUI.
 
+## Project layout
+
+- `DejaViewPix/`: the SwiftUI app.
+- `AlbumAI/`: a local Swift package with the core logic: the Claude Messages API client, its request and response types, and Keychain storage for the API key.
+
 ## Setup
 
 1. Open `DejaViewPix.xcodeproj` in Xcode.
-2. Configure your API key: take `DejaViewPix/Secrets.example.xcconfig`, copy to `Secrets.xcconfig` and add your key.
+2. Build and run. Requires iOS 17.5 or later.
+3. In the app, paste your Claude API key into the key field and tap **Save**. The key is stored in the Keychain on that device only; it is never written to source code, `Info.plist` or build settings.
 
-   ```
-   cp DejaViewPix/Secrets.example.xcconfig DejaViewPix/Secrets.xcconfig
-   ```
+## Tests
 
-   Then set `CLAUDE_API_KEY` in `DejaViewPix/Secrets.xcconfig`. This file is ignored by git, so your key stays local.
-3. Build and run. Requires iOS 17.5 or later.
+The package tests run on your Mac, without the simulator:
 
-> **Note:** The API key is embedded in the app's `Info.plist` and can be extracted from any built `.ipa`. This is fine for local development, but a public release should route requests through a backend that holds the key.
+```
+cd AlbumAI
+swift test
+```
+
+> **Note:** Storing the key in the Keychain is fine for development. A public release should route requests through a backend that holds the key, so it never reaches devices.
