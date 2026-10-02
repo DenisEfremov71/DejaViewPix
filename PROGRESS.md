@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 5 ✅ done (2026-10-02).** Next: **Day 6.**
+**Day 6 ✅ done (2026-10-02).** Next: **Day 7: the eval runner and unit tests.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -212,9 +212,28 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
 
 **Interview answer:** "Why do you show the parsed filters to the user instead of just the results?" Because the model can misread the query, and an unexplained grid hides that. Chips make the interpretation visible: "December 2024–February 2025 · Whistler · 15 km" tells the user at once that "last winter" was read as the wrong year. They also make it fixable in one tap without another model call, which costs nothing and takes no time. That builds trust: the user sees what the app did and stays in control, rather than wondering why their photos are missing.
 
+## Day 6: The eval dataset (done 2026-10-02)
+
+**Built**
+- `evals/cases.json`: 30 cases (25 dev, 5 held-back test). Each has an id, split, query, expected `search_photos` arguments (dates, place, media type, favorites, album), an optional `behavior`, tags and a note. Defaults: today is 2026-10-02 (Friday), time zone America/Vancouver, place tolerance 25 km.
+  - simple 5, relative dates 8, misspellings 3, ambiguous places 3, combined 3, albums 3, favorites 1, impossible 2, out of scope 1, injection 1
+  - test split: `simple-05`, `rel-06`, `typo-03`, `combo-03`, `album-03`
+- The user reviewed the judgment calls (hemisphere, last winter in January, Victoria/Springfield, generic "photos", date tolerances, injection) and kept them as written.
+- `evals/README.md`: what is scored and why, the per-field matching rules, the three behaviors (`search`, `no_photos`, `no_search`), how the cases were chosen, and the test split policy.
+
+**Decisions**
+- Score the arguments of the first valid `search_photos` call, not the returned photos. That avoids labelling a photo library, and our own code turns correct arguments into correct photos.
+- Dates are exact by default (the system prompt defines seasons), with ±1 day only for holidays, "last weekend" and "past two weeks".
+- Places are scored by coordinates (within 25 km, wider for regions), not by string.
+- "Photos" and "pictures" accept `media_type` null or `"photo"`. Filters the user didn't ask for fail.
+- Ambiguous places: context decides when it can (Victoria from Vancouver → BC, from Melbourne → Australia); otherwise any main candidate passes (Springfield).
+- The user's time zone sets the hemisphere when no place is named (`rel-07`). The current prompt doesn't do this yet, on purpose.
+
+**Interview answer:** "How did you build an eval set without labelling thousands of real photos?" By scoring the step that's uncertain, not the whole pipeline. The model's only job is to turn a sentence into search arguments. PhotoKit and the geocoder are deterministic and unit-tested. So each case is a query plus the arguments a careful person would choose, written before running anything, with matching rules decided up front (exact dates, coordinates within a distance, accepted alternatives for genuinely ambiguous queries). The cases cover one failure mode each rather than many phrasings of one, and the same query under different "today" and time-zone contexts shows whether the model reasons or pattern-matches. Five cases are held back and only run once at the end.
+
 ## Open items
 
-- Haiku once read "last winter" as December 2024–February 2025 (on 2026-10-02 the answer is December 2025–February 2026); another run of the same query got it right. Add this to the evals, and consider computing the season's dates in the system prompt.
+- Haiku once read "last winter" as December 2024–February 2025 (on 2026-10-02 the answer is December 2025–February 2026); another run of the same query got it right. Covered by eval cases `rel-02`, `rel-03` and `typo-01`; one possible Day 8 fix is computing the season's dates in the system prompt.
 - Switching tabs mid-search cancels the search (`.task` ends when the view disappears) and runs it again when the user returns. That's acceptable, but it could keep running instead.
 - The bundle ID changed to `com.denisefremov.DejaViewPix` (commit `15bd751`). Simulators and devices that had the old build need photo access granted again and the API key re-entered, because Keychain items belong to the app ID. The iPhone 17 simulator (9D3D28C2…) has the seeded photos, photo access and the key.
 - Before Day 8 (comparing models): Opus 5.5 and Sonnet 5.5 always think, and their replies contain `thinking` blocks. `ContentBlock` decodes those as `.unknown`, which can't be encoded, so the second request of a tool loop would fail on those models. Keep unknown blocks as raw JSON and send them back unchanged.
