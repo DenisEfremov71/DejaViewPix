@@ -50,7 +50,7 @@ public actor ClaudeClient: MessageSending {
 
     public init(
         model: ClaudeModel = .haiku,
-        maxTokens: Int = 1024,
+        maxTokens: Int = 8192,
         system: String? = nil,
         endpoint: URL = ClaudeClient.endpoint,
         session: URLSession = .shared,

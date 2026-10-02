@@ -27,6 +27,7 @@ struct ChatView: View {
     @State private var infoMessage: String?
     @State private var sendTask: Task<Void, Never>?
     @State private var simulateOverload = false
+    @FocusState private var isPromptFocused: Bool
 
     #if DEBUG
     private let client = ClaudeClient(
@@ -51,6 +52,11 @@ struct ChatView: View {
             TextField("Ask Claude something…", text: $prompt, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
+                .focused($isPromptFocused)
+                .submitLabel(.send)
+                .submitOnReturn($prompt) {
+                    if canSend { send() } else { isPromptFocused = false }
+                }
 
             #if DEBUG
             Toggle("Simulate overload (two 529s)", isOn: $simulateOverload)
@@ -95,11 +101,13 @@ struct ChatView: View {
             Spacer(minLength: 0)
         }
         .padding()
+        .dismissesKeyboardOnTap($isPromptFocused)
     }
 
     // MARK: - Sending
 
     private func send() {
+        isPromptFocused = false
         let prompt = prompt
         reply = nil
         errorMessage = nil

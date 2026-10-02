@@ -11,6 +11,7 @@ struct APIKeyView: View {
     @State private var apiKeyInput = ""
     @State private var hasSavedKey = false
     @State private var keyStatus: String?
+    @FocusState private var isKeyFocused: Bool
 
     private var trimmedKeyInput: String {
         apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -26,6 +27,11 @@ struct APIKeyView: View {
                 .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .focused($isKeyFocused)
+                .submitLabel(.done)
+                .onSubmit {
+                    if !trimmedKeyInput.isEmpty { saveKey() }
+                }
 
                 Button("Save", action: saveKey)
                     .buttonStyle(.bordered)
@@ -41,10 +47,12 @@ struct APIKeyView: View {
             Spacer(minLength: 0)
         }
         .padding()
+        .dismissesKeyboardOnTap($isKeyFocused)
         .onAppear(perform: refreshKeyStatus)
     }
 
     private func saveKey() {
+        isKeyFocused = false
         do {
             try APIKeyStore.claude.save(trimmedKeyInput)
             apiKeyInput = ""

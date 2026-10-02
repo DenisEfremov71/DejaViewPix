@@ -20,6 +20,7 @@ struct PhotoSearchView: View {
     @State private var result: ToolLoopResult?
     @State private var errorMessage: String?
     @State private var searchTask: Task<Void, Never>?
+    @FocusState private var isQueryFocused: Bool
 
     private static let log = Logger(subsystem: "DejaViewPix", category: "search")
 
@@ -46,7 +47,9 @@ struct PhotoSearchView: View {
                 TextField("e.g. photos from Whistler last winter", text: $query, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...4)
-                    .onSubmit(search)
+                    .focused($isQueryFocused)
+                    .submitLabel(.search)
+                    .submitOnReturn($query, action: search)
 
                 HStack(spacing: 12) {
                     Button("Search", action: search)
@@ -77,6 +80,8 @@ struct PhotoSearchView: View {
             }
             .padding()
         }
+        .scrollDismissesKeyboard(.interactively)
+        .dismissesKeyboardOnTap($isQueryFocused)
         .onChange(of: scenePhase) { _, phase in
             // The user may have changed access in Settings.
             if phase == .active {
@@ -139,6 +144,7 @@ struct PhotoSearchView: View {
     // MARK: - Searching
 
     private func search() {
+        isQueryFocused = false
         guard canSearch else { return }
         let query = query
         rounds = []
