@@ -16,6 +16,10 @@ public enum ClaudeError: LocalizedError, Sendable, Equatable {
     )
     case invalidResponse
     case noTextContent(stopReason: String?)
+    /// An `error` event arrived in the middle of a stream.
+    case stream(type: String, message: String)
+    /// The stream ended before `message_stop`.
+    case streamInterrupted
 
     public var errorDescription: String? {
         switch self {
@@ -40,6 +44,12 @@ public enum ClaudeError: LocalizedError, Sendable, Equatable {
                 return "Claude declined this request."
             }
             return "Claude responded, but the reply contained no text."
+
+        case .stream(let type, let message):
+            return "The reply stopped with an error (\(type)): \(message)"
+
+        case .streamInterrupted:
+            return "The connection closed before the reply finished."
         }
     }
 }

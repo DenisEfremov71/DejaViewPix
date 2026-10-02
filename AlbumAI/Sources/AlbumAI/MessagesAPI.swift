@@ -12,16 +12,25 @@ public struct MessageRequest: Encodable, Sendable, Equatable {
     public var maxTokens: Int
     public var system: String?
     public var messages: [Message]
+    /// Sent only when true; the API defaults to a single JSON response.
+    public var stream: Bool?
 
-    public init(model: String, maxTokens: Int, system: String? = nil, messages: [Message]) {
+    public init(
+        model: String,
+        maxTokens: Int,
+        system: String? = nil,
+        messages: [Message],
+        stream: Bool? = nil
+    ) {
         self.model = model
         self.maxTokens = maxTokens
         self.system = system
         self.messages = messages
+        self.stream = stream
     }
 
     private enum CodingKeys: String, CodingKey {
-        case model, system, messages
+        case model, system, messages, stream
         case maxTokens = "max_tokens"
     }
 }

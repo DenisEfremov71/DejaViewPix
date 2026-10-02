@@ -8,18 +8,37 @@
 import AlbumAI
 import SwiftUI
 
+/// The reply as it streams in, plus its metrics.
+struct StreamedReply {
+    var text = ""
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var stopReason: String?
+    var timeToFirstToken: Duration?
+    var totalTime: Duration?
+}
+
 struct ContentView: View {
     @State private var apiKeyInput = ""
     @State private var hasSavedKey = false
     @State private var keyStatus: String?
 
     @State private var prompt = ""
-    @State private var reply: ClaudeReply?
+    @State private var reply: StreamedReply?
+    @State private var retryMessage: String?
     @State private var errorMessage: String?
     @State private var infoMessage: String?
     @State private var sendTask: Task<Void, Never>?
+    @State private var simulateOverload = false
 
+    #if DEBUG
+    private let client = ClaudeClient(
+        session: SimulatedOverload.session,
+        apiKey: { try APIKeyStore.claude.load() }
+    )
+    #else
     private let client = ClaudeClient(apiKey: { try APIKeyStore.claude.load() })
+    #endif
 
     private var isLoading: Bool {
         sendTask != nil
@@ -44,6 +63,11 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
 
+            #if DEBUG
+            Toggle("Simulate overload (two 529s)", isOn: $simulateOverload)
+                .font(.footnote)
+            #endif
+
             HStack(spacing: 12) {
                 Button("Send", action: send)
                     .buttonStyle(.borderedProminent)
@@ -63,6 +87,11 @@ struct ContentView: View {
                 Text(errorMessage)
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
+            }
+
+            if let retryMessage {
+                Text(retryMessage)
+                    .foregroundStyle(.orange)
             }
 
             if let infoMessage {
@@ -134,11 +163,43 @@ struct ContentView: View {
         errorMessage = nil
         infoMessage = nil
 
-        sendTask = Task {
-            defer { sendTask = nil }
+        retryMessage = nil
+        #if DEBUG
+        SimulatedOverload.arm(count: simulateOverload ? 2 : 0)
+        #endif
 
+        sendTask = Task {
+            defer {
+                sendTask = nil
+                retryMessage = nil
+            }
+
+            let clock = ContinuousClock()
+            let start = clock.now
             do {
-                reply = try await client.send(prompt)
+                for try await event in client.stream(prompt) {
+                    switch event {
+                    case .retrying(let attempt, let maxAttempts, let delay, _):
+                        retryMessage = "Server busy, retrying in \(Self.formatSeconds(delay)) "
+                            + "(attempt \(attempt) of \(maxAttempts))…"
+                    case .messageStart(_, let usage):
+                        retryMessage = nil
+                        reply = StreamedReply(inputTokens: usage.inputTokens)
+                    case .textDelta(_, let text):
+                        if reply?.timeToFirstToken == nil {
+                            reply?.timeToFirstToken = start.duration(to: clock.now)
+                        }
+                        reply?.text += text
+                    case .messageDelta(let stopReason, let outputTokens):
+                        reply?.stopReason = stopReason
+                        reply?.outputTokens = outputTokens
+                    default:
+                        break
+                    }
+                }
+                // A cancelled stream ends quietly, so check before reporting success.
+                try Task.checkCancellation()
+                reply?.totalTime = start.duration(to: clock.now)
             } catch is CancellationError {
                 infoMessage = "Request cancelled."
             } catch {
@@ -149,18 +210,16 @@ struct ContentView: View {
 
     // MARK: - Reply
 
-    private func replyPanel(_ reply: ClaudeReply) -> some View {
+    private func replyPanel(_ reply: StreamedReply) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(spacing: 4) {
-                LabeledContent("Tokens in / out", value: "\(reply.usage.inputTokens) / \(reply.usage.outputTokens)")
-                LabeledContent("Latency", value: Self.format(reply.latency))
+                LabeledContent(
+                    "Tokens in / out",
+                    value: "\(reply.inputTokens.map(String.init) ?? "—") / \(reply.outputTokens.map(String.init) ?? "—")"
+                )
+                LabeledContent("First token", value: reply.timeToFirstToken.map(Self.format) ?? "—")
+                LabeledContent("Total", value: reply.totalTime.map(Self.format) ?? "—")
                 LabeledContent("Stop reason", value: reply.stopReason ?? "—")
-                LabeledContent("Request ID") {
-                    Text(reply.requestID ?? "—")
-                        .textSelection(.enabled)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
             }
             .font(.footnote)
             .padding(10)
@@ -180,9 +239,14 @@ struct ContentView: View {
         }
     }
 
-    private static func format(_ latency: Duration) -> String {
+    nonisolated private static func format(_ latency: Duration) -> String {
         let milliseconds = latency / .milliseconds(1)
         return "\(Int(milliseconds.rounded())) ms"
+    }
+
+    nonisolated private static func formatSeconds(_ duration: Duration) -> String {
+        let seconds = duration / .seconds(1)
+        return "\(seconds.formatted(.number.precision(.fractionLength(1)))) s"
     }
 }
 
