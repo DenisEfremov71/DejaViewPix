@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 4 🟡 built, awaiting the live check in the simulator (2026-10-02).** Next: check a few real queries (validated result plus one usage line in the console), then **Day 5: The SwiftUI experience.**
+**Day 4 ✅ done (2026-10-02).** Next: **Day 5: The SwiftUI experience.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -106,7 +106,7 @@
 
 **Interview answer:** "Walk me through one tool-calling round trip. What exactly goes into the second request?" The second request carries the same model, system prompt and tools. Its messages are: the original user message; Claude's assistant message unchanged, with its text and `tool_use` blocks (id, name, input); then a new user message with one `tool_result` block per `tool_use`, matched by `tool_use_id`, with the tool's output as content and `is_error: true` on failures. The API is stateless, so the whole conversation is resent each round, and input tokens grow with every round.
 
-## Day 4: Structured output, validation and cost (built 2026-10-02)
+## Day 4: Structured output, validation and cost (done 2026-10-02)
 
 **Built**
 - `present_results` tool (`SearchAnswer.toolDefinition`): `summary` plus `photo_ids`, `strict: true`, `tool_choice` left at `auto`. The system prompt tells Claude to always finish with it.
@@ -132,7 +132,15 @@
   - shows the summary, the applied filters, the thumbnails and the cost
 - 70 tests. New ones cover: the Whistler run ending in `present_results` with rebuilt filters and place name, an invented ID corrected once, a second invalid answer failing, IDs with no successful search, an empty summary, a prose ending nudged once, a second prose ending failing, `present_results` mixed with other tools, filters taken only from contributing searches, `strict` encoding, the price table and alias matching, cost across all token kinds, cache fields decoding, and the log line.
 
-**Verified:** `swift test` passes (70 tests), the app builds without warnings, and `pricing.json` is in the app bundle. Not yet verified: real queries in the simulator.
+**Verified:** `swift test` passes (70 tests), the app builds without warnings, and `pricing.json` is in the app bundle. Live in the iPhone 17 simulator (Haiku 4.5), each query produced a validated result and one usage line:
+
+| Query | Rounds | Tokens in / out | Cost | Result |
+|---|---|---|---|---|
+| Photos from Whistler | 3 (geocode → search → present) | 5918 / 402 | $0.0079 | 4 photos (no season in the query, so the July one is correct) |
+| Photos from Tokyo | 3 | 5673 / 293 | $0.0071 | 0 photos, clean "nothing found" summary |
+| my favorite videos | 3 (search → prose → present) | 5582 / 195 | $0.0066 | 0 photos. Round 2 ended in prose; the nudge worked and round 3 called `present_results` |
+
+**Finding:** a typical query costs about $0.007, and input is about 94% of the tokens. The system prompt, the tools and the growing conversation are resent each round, so a 3-round query costs about 3× a single call. Prompt caching (system plus tools) is the obvious lever.
 
 **Decisions**
 - **A `present_results` tool instead of `output_config.format`.** Native structured output is GA (no beta header) on Haiku 4.5, Sonnet 5.5 and Opus 5.5, and it works alongside tools (only the final text is constrained). The tool was chosen because:
@@ -153,5 +161,6 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
 
 ## Open items
 
-- Live check of Day 4 in the simulator: run a few queries and confirm the validated result in the UI and one usage line per query in the Xcode console (`search … · claude-haiku-4-5-… · N rounds · … · $…`).
+- A round that ends in prose has no tool calls, so the trace shows no line for it (round 2 of "my favorite videos"). Show the prose and the nudge in the trace, maybe as part of Day 5.
+- The bundle ID changed to `com.denisefremov.DejaViewPix` (commit `15bd751`). Simulators and devices that had the old build need photo access granted again and the API key re-entered, because Keychain items belong to the app ID. The iPhone 17 simulator (9D3D28C2…) has the seeded photos, photo access and the key.
 - Before Day 8 (comparing models): Opus 5.5 and Sonnet 5.5 always think, and their replies contain `thinking` blocks. `ContentBlock` decodes those as `.unknown`, which can't be encoded, so the second request of a tool loop would fail on those models. Keep unknown blocks as raw JSON and send them back unchanged.
