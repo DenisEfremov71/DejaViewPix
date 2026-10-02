@@ -10,9 +10,22 @@
 		929276E2306ED43100AAF4BB /* DejaViewPix.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DejaViewPix.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		929276F7306EEB2000AAF4BB /* Exceptions for "DejaViewPix" folder in "DejaViewPix" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 929276E1306ED43100AAF4BB /* DejaViewPix */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		929276E4306ED43100AAF4BB /* DejaViewPix */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				929276F7306EEB2000AAF4BB /* Exceptions for "DejaViewPix" folder in "DejaViewPix" target */,
+			);
 			path = DejaViewPix;
 			sourceTree = "<group>";
 		};
@@ -168,7 +181,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -226,7 +239,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -238,6 +251,8 @@
 		};
 		929276EE306ED43200AAF4BB /* Debug configuration for PBXNativeTarget "DejaViewPix" */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 929276E4306ED43100AAF4BB /* DejaViewPix */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -246,6 +261,7 @@
 				DEVELOPMENT_TEAM = 6GD48DS8QQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DejaViewPix/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -271,6 +287,8 @@
 		};
 		929276EF306ED43200AAF4BB /* Release configuration for PBXNativeTarget "DejaViewPix" */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 929276E4306ED43100AAF4BB /* DejaViewPix */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -279,6 +297,7 @@
 				DEVELOPMENT_TEAM = 6GD48DS8QQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DejaViewPix/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

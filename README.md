@@ -12,4 +12,6 @@ An iOS app built with SwiftUI.
    ```
 
    Then set `CLAUDE_API_KEY` in `DejaViewPix/Secrets.xcconfig`. This file is ignored by git, so your key stays local.
-3. Build and run.
+3. Build and run. Requires iOS 17.5 or later.
+
+> **Note:** The API key is embedded in the app's `Info.plist` and can be extracted from any built `.ipa`. This is fine for local development, but a public release should route requests through a backend that holds the key.
