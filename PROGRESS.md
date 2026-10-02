@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 2 ✅ complete (2026-10-02).** Next: **Day 3: PhotoKit search and the tool loop.**
+**Day 3 🟡 built, awaiting the live check in the simulator (2026-10-02).** Next: verify "photos from Whistler last winter" end to end, then **Day 4: Structured output, validation and cost.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -66,6 +66,46 @@
 
 **Interview answer:** "Why is retrying mid-stream dangerous?" The user has already seen part of the reply, and a retry generates a new, different reply. Appending it would duplicate or garble the text, and the input tokens would be paid twice. The client retries only before the first event arrives. After that it surfaces the error and keeps the partial text, and the user decides whether to resend.
 
+## Day 3: PhotoKit search and the tool loop (built 2026-10-02)
+
+**Built**
+- `JSONValue.swift`: any JSON value (Codable, literal-expressible), `decode(as:)`, compact sorted `jsonString`.
+- Messages API: `ContentBlock.toolUse(id:name:input:)` and `.toolResult(toolUseID:content:isError:)` (`is_error` sent only when true), `ToolDefinition` (`input_schema`), `MessageRequest.tools`, `MessageResponse.toolUses`.
+- `ClaudeClient.createMessage(system:messages:tools:)`: non-streaming, full conversation, same retry policy as streaming. Conforms to the new `MessageSending` protocol.
+- `PhotoSearching.swift`: the protocols `PhotoSearching` and `PlaceGeocoding`, plus `PhotoQuery`, `GeoCircle`, `PhotoMatch`, `AlbumInfo` and `Place` (whose `Kind` sets the radius: address 300 m, beach 1.5 km, city 15 km, region 200 km, country 1000 km).
+- `PhotoLibrary.swift` (PhotoKit):
+  - date, media type and favorite go into the predicate, sorted by `creationDate`, with `fetchLimit = limit + 1` to detect "more available"
+  - location searches fetch without a limit and filter with `CLLocation.distance(from:)`
+  - albums are looked up by title (user albums first, then a curated set of smart albums)
+- `PlaceGeocoder.swift`: `MKGeocodingRequest` on iOS/macOS 26+, `CLGeocoder` on earlier versions (deployment target 17.5). It classifies the result (POI category, or the name compared with the city/country) to pick the radius.
+- `PhotoTools.swift`: `search_photos`, `geocode_place` and `list_albums`, with JSON Schemas and descriptions written as prompts.
+  - Inputs are validated: YYYY-MM-DD days in the user's time zone with an inclusive `date_to`, lat/lon/radius given together and in range, enums checked, limit clamped to 1–100.
+  - Results are compact JSON: id, local date, km from the center, and video/favorite flags only when true.
+- `ToolLoop.swift`:
+  - `SearchPrompt.system(now:timeZone:)` includes "Today is 2026-10-02 (Friday), time zone …", plus rules for seasons and filters.
+  - `ToolLoop` appends the assistant message unchanged, then one user message with a `tool_result` per `tool_use`, in order.
+  - Capped at 5 requests (`ToolLoopError.roundLimitReached`). An unexpected stop reason throws.
+  - Any tool error becomes `is_error: true`. Only cancellation propagates.
+  - `onRound` reports progress.
+- App:
+  - tabs: Search (new), Chat (the Day 2 screen, now `ChatView`), API Key (`APIKeyView`)
+  - `NSPhotoLibraryUsageDescription` set through the `INFOPLIST_KEY_` build setting
+  - access banner for not determined, limited, denied and restricted, rechecked when the app becomes active
+  - a live round-by-round trace and a thumbnail grid of the returned IDs
+  - tool calls logged with OSLog (subsystem `DejaViewPix`, category `search`)
+- `scripts/seed-simulator-photos.swift`: generates 9 JPEGs with EXIF dates and GPS (Whistler in winter ×3, Whistler in summer, Vancouver, Squamish, Paris, Tofino, one without GPS) and runs `simctl addmedia booted`.
+- 56 tests in total. New ones cover: the Whistler round trip over a scripted client (the exact second and third request bodies, and Vancouver day boundaries), a failing tool returned as `is_error`, an unknown tool, bad input, several calls in one turn, the 5-round cap, `max_tokens`, cancellation inside a tool, input validation cases, JSONValue, tool block encoding, the PhotoKit predicate and place classification.
+
+**Verified:** `swift test` passes (56 tests), and the app builds without warnings. Not yet verified: the real query in the simulator.
+
+**Decisions**
+- The loop is non-streaming. Tool rounds are short and need the whole reply anyway; streaming the final answer can come later.
+- Tool errors are caught in the loop, not in each tool, so no tool implementation can crash the loop.
+- Location is three flat fields (`latitude`, `longitude`, `radius_meters`) rather than a nested object, which is easier for the model to fill.
+- Results carry no reverse-geocoded place names. That would mean a network call per photo; the distance in km is cheaper and enough for the model.
+
+**Interview answer:** "Walk me through one tool-calling round trip. What exactly goes into the second request?" The second request carries the same model, system prompt and tools. Its messages are: the original user message; Claude's assistant message unchanged, with its text and `tool_use` blocks (id, name, input); then a new user message with one `tool_result` block per `tool_use`, matched by `tool_use_id`, with the tool's output as content and `is_error: true` on failures. The API is stateless, so the whole conversation is resent each round, and input tokens grow with every round.
+
 ## Open items
 
-- None.
+- Live check of Day 3 in the simulator: "photos from Whistler last winter" should call geocode_place, then search_photos with Dec 2025–Feb 2026 and about 15 km, and return the 3 winter Whistler photos.

@@ -23,7 +23,17 @@ public struct ClaudeReply: Sendable, Equatable {
     public var requestID: String?
 }
 
-public actor ClaudeClient {
+/// Sends one Messages API request with a full conversation. `ClaudeClient` conforms;
+/// tests swap in a scripted fake.
+public protocol MessageSending: Sendable {
+    func createMessage(
+        system: String?,
+        messages: [Message],
+        tools: [ToolDefinition]
+    ) async throws -> MessageResponse
+}
+
+public actor ClaudeClient: MessageSending {
     public let model: ClaudeModel
     public let maxTokens: Int
     public let system: String?
@@ -80,6 +90,59 @@ public actor ClaudeClient {
 
         try Task.checkCancellation()
         return try Self.makeReply(data: data, response: response, latency: latency)
+    }
+
+    // MARK: - Conversations with tools
+
+    /// Sends a whole conversation and returns the decoded reply, tool calls included.
+    /// Retryable failures are retried with backoff, like `stream(_:)`.
+    public nonisolated func createMessage(
+        system: String?,
+        messages: [Message],
+        tools: [ToolDefinition]
+    ) async throws -> MessageResponse {
+        let body = MessageRequest(
+            model: model.rawValue,
+            maxTokens: maxTokens,
+            system: system,
+            messages: messages,
+            tools: tools.isEmpty ? nil : tools
+        )
+
+        var attempt = 1
+        while true {
+            try Task.checkCancellation()
+            do {
+                return try await createMessageOnce(body)
+            } catch {
+                guard !Task.isCancelled,
+                      attempt < retryPolicy.maxAttempts,
+                      RetryPolicy.isRetryable(error)
+                else { throw error }
+
+                attempt += 1
+                try await sleep(retryPolicy.delay(
+                    beforeAttempt: attempt,
+                    retryAfter: (error as? ClaudeError)?.retryAfter
+                ))
+            }
+        }
+    }
+
+    private nonisolated func createMessageOnce(_ body: MessageRequest) async throws -> MessageResponse {
+        let request = try Self.makeURLRequest(body: body, apiKey: apiKey(), endpoint: endpoint)
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ClaudeError.invalidResponse
+            }
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw Self.httpError(data: data, response: httpResponse)
+            }
+            return try JSONDecoder().decode(MessageResponse.self, from: data)
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        }
     }
 
     // MARK: - Streaming
