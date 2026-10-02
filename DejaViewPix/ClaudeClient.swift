@@ -82,8 +82,15 @@ enum ClaudeError: LocalizedError {
     }
 }
 
+enum ClaudeModel: String {
+    case haiku = "claude-haiku-4-5-20251001"
+    case sonnet = "claude-sonnet-5-5"
+    case opus = "claude-opus-5-5"
+    case nonexisting = "claude-nope"
+}
+
 struct ClaudeClient {
-    var model = "claude-haiku-4-5-20251001"
+    var model: ClaudeModel = .haiku
     var maxTokens = 1024
     var session: URLSession = .shared
 
@@ -94,7 +101,7 @@ struct ClaudeClient {
         let apiKey = try APIConfig.claudeAPIKey()
 
         let body = MessageRequest(
-            model: model,
+            model: model.rawValue,
             maxTokens: maxTokens,
             messages: [Message(role: "user", content: prompt)]
         )
