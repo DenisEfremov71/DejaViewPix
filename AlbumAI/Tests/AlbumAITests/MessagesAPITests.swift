@@ -50,10 +50,18 @@ struct RequestEncodingTests {
         #expect(json["system"] as? String == "You are terse.")
     }
 
-    @Test func unknownBlockCannotBeEncoded() {
-        #expect(throws: EncodingError.self) {
-            try JSONEncoder().encode(ContentBlock.unknown(type: "thinking"))
+    @Test func unknownBlockRoundTripsUnchanged() throws {
+        let json = #"{"signature":"EqQBCkYI","thinking":"The user wants photos.","type":"thinking"}"#
+        let block = try JSONDecoder().decode(ContentBlock.self, from: Data(json.utf8))
+
+        guard case .unknown(let type, _) = block else {
+            Issue.record("Expected an unknown block, got \(block)")
+            return
         }
+        #expect(type == "thinking")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        #expect(String(decoding: try encoder.encode(block), as: UTF8.self) == json)
     }
 
     @Test func urlRequestHasMethodAndHeaders() throws {
@@ -106,7 +114,7 @@ struct ResponseDecodingTests {
     @Test func decodesKnownAndUnknownBlocks() throws {
         let response = try JSONDecoder().decode(MessageResponse.self, from: Data(Self.successJSON.utf8))
 
-        #expect(response.content == [.unknown(type: "thinking"), .text("Hello"), .text("there")])
+        #expect(response.content == [.unknown(type: "thinking", raw: ["type": "thinking", "thinking": "", "signature": "abc"]), .text("Hello"), .text("there")])
         #expect(response.stopReason == "end_turn")
         #expect(response.usage == Usage(inputTokens: 12, outputTokens: 3))
         #expect(response.text == "Hello\nthere")

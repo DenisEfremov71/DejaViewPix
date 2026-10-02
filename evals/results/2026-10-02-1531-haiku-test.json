@@ -1,0 +1,363 @@
+{
+  "cases" : [
+    {
+      "id" : "simple-05",
+      "query" : "videos from June",
+      "runs" : [
+        {
+          "costUSD" : 0.005545,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 4330,
+          "latencySeconds" : 3.05268675,
+          "observed" : {
+            "dateFrom" : "2026-06-01",
+            "dateTo" : "2026-06-30",
+            "favoritesOnly" : false,
+            "mediaType" : "video"
+          },
+          "outputTokens" : 243,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 2
+        },
+        {
+          "costUSD" : 0.005377,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 4307,
+          "latencySeconds" : 2.928017583,
+          "observed" : {
+            "dateFrom" : "2026-06-01",
+            "dateTo" : "2026-06-30",
+            "favoritesOnly" : false,
+            "mediaType" : "video"
+          },
+          "outputTokens" : 214,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 2
+        }
+      ],
+      "split" : "test",
+      "status" : "pass",
+      "tags" : [
+        "simple",
+        "dates",
+        "media_type"
+      ]
+    },
+    {
+      "id" : "rel-06",
+      "query" : "what did I shoot last weekend",
+      "runs" : [
+        {
+          "costUSD" : 0.005273,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 4288,
+          "latencySeconds" : 2.807039292,
+          "observed" : {
+            "dateFrom" : "2026-09-26",
+            "dateTo" : "2026-09-27",
+            "favoritesOnly" : false
+          },
+          "outputTokens" : 197,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 2
+        },
+        {
+          "costUSD" : 0.005313,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 4288,
+          "latencySeconds" : 2.912667042,
+          "observed" : {
+            "dateFrom" : "2026-09-26",
+            "dateTo" : "2026-09-27",
+            "favoritesOnly" : false
+          },
+          "outputTokens" : 205,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 2
+        }
+      ],
+      "split" : "test",
+      "status" : "pass",
+      "tags" : [
+        "relative_date"
+      ]
+    },
+    {
+      "id" : "typo-03",
+      "query" : "favourite pics from Vancuver",
+      "runs" : [
+        {
+          "costUSD" : 0.008186,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 6671,
+          "latencySeconds" : 4.117871125,
+          "observed" : {
+            "favoritesOnly" : true,
+            "latitude" : 49.2604,
+            "longitude" : -123.1139,
+            "radiusMeters" : 15000
+          },
+          "outputTokens" : 303,
+          "passed" : true,
+          "presentedCount" : 2,
+          "problems" : [
+
+          ],
+          "rounds" : 3
+        },
+        {
+          "costUSD" : 0.008146,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 6651,
+          "latencySeconds" : 3.996200792,
+          "observed" : {
+            "favoritesOnly" : true,
+            "latitude" : 49.2604,
+            "longitude" : -123.1139,
+            "radiusMeters" : 15000
+          },
+          "outputTokens" : 299,
+          "passed" : true,
+          "presentedCount" : 2,
+          "problems" : [
+
+          ],
+          "rounds" : 3
+        }
+      ],
+      "split" : "test",
+      "status" : "pass",
+      "tags" : [
+        "misspelling",
+        "place",
+        "favorites"
+      ]
+    },
+    {
+      "id" : "combo-03",
+      "query" : "videos from Squamish between Christmas and New Year",
+      "runs" : [
+        {
+          "costUSD" : 0.008877,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 6792,
+          "latencySeconds" : 6.726094624999999,
+          "observed" : {
+            "dateFrom" : "2025-12-25",
+            "dateTo" : "2026-01-01",
+            "favoritesOnly" : false,
+            "latitude" : 49.6979,
+            "longitude" : -123.1556,
+            "mediaType" : "video",
+            "radiusMeters" : 15000
+          },
+          "outputTokens" : 417,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 3
+        },
+        {
+          "costUSD" : 0.008892,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 6777,
+          "latencySeconds" : 7.809101542,
+          "observed" : {
+            "dateFrom" : "2025-12-24",
+            "dateTo" : "2026-01-02",
+            "favoritesOnly" : false,
+            "latitude" : 49.6979,
+            "longitude" : -123.1556,
+            "mediaType" : "video",
+            "radiusMeters" : 15000
+          },
+          "outputTokens" : 423,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 3
+        }
+      ],
+      "split" : "test",
+      "status" : "pass",
+      "tags" : [
+        "combined",
+        "place",
+        "holiday",
+        "media_type"
+      ]
+    },
+    {
+      "id" : "album-03",
+      "query" : "selfies from Paris",
+      "runs" : [
+        {
+          "costUSD" : 0.008596,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 6881,
+          "latencySeconds" : 4.508685375,
+          "observed" : {
+            "album" : "Selfies",
+            "favoritesOnly" : false,
+            "latitude" : 48.8568,
+            "longitude" : 2.3511,
+            "radiusMeters" : 15000
+          },
+          "outputTokens" : 343,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 3
+        },
+        {
+          "costUSD" : 0.008598,
+          "fields" : {
+            "album" : true,
+            "dates" : true,
+            "favorites_only" : true,
+            "media_type" : true,
+            "place" : true
+          },
+          "inputTokens" : 6883,
+          "latencySeconds" : 4.303041292,
+          "observed" : {
+            "album" : "Selfies",
+            "favoritesOnly" : false,
+            "latitude" : 48.8568,
+            "longitude" : 2.3511,
+            "radiusMeters" : 15000
+          },
+          "outputTokens" : 343,
+          "passed" : true,
+          "presentedCount" : 1,
+          "problems" : [
+
+          ],
+          "rounds" : 3
+        }
+      ],
+      "split" : "test",
+      "status" : "pass",
+      "tags" : [
+        "album",
+        "smart_album",
+        "place",
+        "combined"
+      ]
+    }
+  ],
+  "date" : "2026-10-02T22:31:24Z",
+  "geocodes" : {
+    "paris, france" : "Paris, France (48.8567879, 2.3510768, city)",
+    "squamish, british columbia" : "Squamish, Squamish BC, Canada (49.6979338, -123.1555981, city)",
+    "vancouver, british columbia" : "Vancouver, Vancouver BC, Canada (49.2604134, -123.1139456, city)"
+  },
+  "model" : "claude-haiku-4-5-20251001",
+  "promptFingerprint" : "6c1c47fd3a50",
+  "reportedModels" : [
+    "claude-haiku-4-5-20251001"
+  ],
+  "runsPerCase" : 2,
+  "splits" : [
+    "test"
+  ],
+  "summary" : {
+    "averageCostUSD" : 0.007280299999999998,
+    "averageInputTokens" : 5786.8,
+    "averageLatencySeconds" : 4.3161405418,
+    "averageOutputTokens" : 298.7,
+    "averageRounds" : 2.6,
+    "behaviorAccuracy" : 1,
+    "cases" : 5,
+    "casesFailed" : 0,
+    "casesFlaky" : 0,
+    "casesPassed" : 5,
+    "exactMatchRate" : 1,
+    "fieldAccuracy" : {
+      "album" : 1,
+      "dates" : 1,
+      "favorites_only" : 1,
+      "media_type" : 1,
+      "place" : 1
+    },
+    "p95LatencySeconds" : 7.809101542,
+    "runs" : 10,
+    "totalCostUSD" : 0.07280299999999998
+  }
+}

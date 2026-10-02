@@ -57,15 +57,16 @@ public struct Message: Codable, Sendable, Equatable {
     }
 }
 
-/// A content block. Types this client doesn't know yet decode as `.unknown`,
-/// so new block types from the API never break decoding.
+/// A content block. Types this client doesn't know yet (such as `thinking` from models
+/// that always think) decode as `.unknown` with their raw JSON, so new block types never
+/// break decoding, and they go back to the API unchanged in the next request.
 public enum ContentBlock: Sendable, Equatable {
     case text(String)
     /// Claude asks the client to run a tool.
     case toolUse(id: String, name: String, input: JSONValue)
     /// The client's answer to a `toolUse` block, sent back in a user message.
     case toolResult(toolUseID: String, content: String, isError: Bool = false)
-    case unknown(type: String)
+    case unknown(type: String, raw: JSONValue)
 }
 
 extension ContentBlock: Codable {
@@ -95,11 +96,16 @@ extension ContentBlock: Codable {
                 isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false
             )
         default:
-            self = .unknown(type: type)
+            // Kept whole: thinking blocks carry a signature the API checks when they come back.
+            self = .unknown(type: type, raw: try JSONValue(from: decoder))
         }
     }
 
     public func encode(to encoder: any Encoder) throws {
+        if case .unknown(_, let raw) = self {
+            try raw.encode(to: encoder)
+            return
+        }
         var container = encoder.container(keyedBy: CodingKeys.self)
 
         switch self {
@@ -121,14 +127,8 @@ extension ContentBlock: Codable {
                 try container.encode(true, forKey: .isError)
             }
 
-        case .unknown(let type):
-            throw EncodingError.invalidValue(
-                self,
-                EncodingError.Context(
-                    codingPath: container.codingPath,
-                    debugDescription: "Cannot encode a content block of unknown type \"\(type)\"."
-                )
-            )
+        case .unknown:
+            break  // Encoded above.
         }
     }
 }

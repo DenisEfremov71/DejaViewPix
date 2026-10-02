@@ -455,6 +455,23 @@ struct SearchInputTests {
 // MARK: - Prompt and definitions
 
 struct SearchPromptTests {
+    @Test func seasonLinesListTheLastCompletedSeasons() {
+        let october = SearchPrompt.seasonLines(now: date("2026-10-02T19:00:00Z"), timeZone: vancouver)
+        #expect(october == """
+            Most recent seasons that have ended (use these for "last summer" and the like):
+            - Northern hemisphere: spring 2026-03-01 to 2026-05-31, summer 2026-06-01 to 2026-08-31, \
+            autumn 2025-09-01 to 2025-11-30, winter 2025-12-01 to 2026-02-28
+            - Southern hemisphere: spring 2025-09-01 to 2025-11-30, summer 2025-12-01 to 2026-02-28, \
+            autumn 2026-03-01 to 2026-05-31, winter 2026-06-01 to 2026-08-31
+            """)
+
+        // In January the current winter hasn't ended; February's length follows leap years.
+        let january = SearchPrompt.seasonLines(now: date("2024-01-10T19:00:00Z"), timeZone: vancouver)
+        #expect(january.contains("winter 2022-12-01 to 2023-02-28"))
+        let march = SearchPrompt.seasonLines(now: date("2024-03-01T19:00:00Z"), timeZone: vancouver)
+        #expect(march.contains("winter 2023-12-01 to 2024-02-29"))
+    }
+
     @Test func todayLineUsesInjectedDateAndTimeZone() {
         // 03:00 UTC on Oct 3 is still Oct 2 in Vancouver.
         let line = SearchPrompt.todayLine(now: date("2026-10-03T03:00:00Z"), timeZone: vancouver)

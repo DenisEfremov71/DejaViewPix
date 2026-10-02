@@ -14,19 +14,66 @@ public enum SearchPrompt {
         never invent photo IDs.
 
         \(todayLine(now: now, timeZone: timeZone))
-        Resolve relative dates against this date. Seasons follow the northern hemisphere \
-        unless the place is in the southern one: winter is December through February. "Last \
+        Resolve relative dates against this date. Seasons follow the hemisphere of the place \
+        the user names or, when they name none, of their time zone; in the northern \
+        hemisphere winter is December through February. "Last \
         winter" means the most recent winter that has already ended. "Last year" means the \
-        previous calendar year.
+        previous calendar year. A named day, such as Christmas or New Year's Day, means that \
+        date give or take a day, not the whole month, unless the user asks for a wider period \
+        ("the Christmas holidays", "around Christmas").
+        \(seasonLines(now: now, timeZone: timeZone))
 
         - When the user names a place, call geocode_place first, then pass its latitude, \
         longitude and radius_meters to search_photos.
+        - The user can't answer questions: there is no follow-up turn. If a place name could \
+        mean several places, pick the one their time zone points to (the nearest likely one), \
+        or else the best-known one, put its region or country in the geocode_place query, and \
+        say in the summary which one you searched.
         - When the user names an album, call list_albums unless you already know its exact title.
         - Only set filters the user asked for. Don't add a location, date or media type they didn't mention.
         - If a search finds nothing, you may retry once with a wider date range or radius, and say so.
         - Always finish by calling present_results, even when nothing matched. Its photo_ids must \
         be copied from search_photos results.
         """
+    }
+
+    /// The most recent completed season of each kind, in both hemispheres, so "last summer"
+    /// is a lookup rather than date arithmetic:
+    /// "Most recent seasons that have ended (use these for "last summer" and the like):
+    /// - Northern hemisphere: spring 2026-03-01 to 2026-05-31, summer 2026-06-01 to …"
+    public static func seasonLines(now: Date, timeZone: TimeZone) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let today = calendar.startOfDay(for: now)
+
+        // Meteorological seasons: three whole months each.
+        let northern = [("spring", 3), ("summer", 6), ("autumn", 9), ("winter", 12)]
+        let southern = [("spring", 9), ("summer", 12), ("autumn", 3), ("winter", 6)]
+
+        func lastCompleted(startMonth: Int) -> String {
+            var year = calendar.component(.year, from: today)
+            while true {
+                let start = calendar.date(from: DateComponents(year: year, month: startMonth, day: 1))!
+                let end = calendar.date(byAdding: DateComponents(month: 3, day: -1), to: start)!
+                if end < today {
+                    return "\(day(start, calendar)) to \(day(end, calendar))"
+                }
+                year -= 1
+            }
+        }
+        func line(_ seasons: [(String, Int)]) -> String {
+            seasons.map { "\($0.0) \(lastCompleted(startMonth: $0.1))" }.joined(separator: ", ")
+        }
+        return """
+            Most recent seasons that have ended (use these for "last summer" and the like):
+            - Northern hemisphere: \(line(northern))
+            - Southern hemisphere: \(line(southern))
+            """
+    }
+
+    private static func day(_ date: Date, _ calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
     }
 
     /// "Today is 2026-10-02 (Friday), time zone America/Vancouver."

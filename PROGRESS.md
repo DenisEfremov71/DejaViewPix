@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 7 ✅ done (2026-10-02).** Baseline on Haiku 4.5: 76% exact match, $0.006 per query. Next: **Day 8: improve and compare models.**
+**Day 8 ✅ done (2026-10-02).** Haiku 4.5 at 98% for $0.0066 per query; Sonnet 5.5 at 100% for $0.0156. Shipping Haiku. Next: **Day 9.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -279,9 +279,45 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
 
 **Interview answer:** "What's the difference between your unit tests and your evals, and why do you need both?" Unit tests check my code against a scripted model. They're deterministic, offline and fast, and they prove the loop, validation and scoring do what I intend in every edge case: invalid answers, tool errors, the round cap. Evals check the real model against expectations I wrote down. They cost money, vary between runs and take minutes, and they measure quality: does Haiku turn "last summer" into the right dates? I need both because they catch different failures. A unit test can't tell me the model is off by a year on seasons, and an eval can't tell me whether that's the model or a bug in my loop unless the loop is already proven by unit tests.
 
+## Day 8: Improve and compare models (done 2026-10-02)
+
+**Built**
+- Prerequisite: `ContentBlock.unknown(type:raw:)` keeps the block's raw JSON and encodes it back unchanged (it used to throw). Sonnet 5.5 and Opus 5.5 return `thinking` blocks with a signature, and multi-round tool loops on those models now work. Verified live: a 3-round Sonnet search passed.
+- System prompt (`SearchPrompt`), four changes, each measured on its own (see `evals/CHANGELOG.md`):
+  1. `seasonLines(now:timeZone:)`: the computed date ranges of the most recent completed spring, summer, autumn and winter, for both hemispheres. Unit-tested, including leap-year Februaries.
+  2. A named day (Christmas, New Year's Day) means that date ± a day, not the month, unless the user asks for a wider period.
+  3. Seasons follow the hemisphere of the named place or, if none, of the user's time zone.
+  4. The user can't answer questions. An ambiguous place resolves by time zone, else to the best-known one, and the summary says which.
+- `evals/CHANGELOG.md`: change → score before/after → kept/reverted, plus the model comparison and decision.
+- 108 package tests (+1 season test; the unknown-block test now checks the round trip).
+
+**Results** (25 dev cases × 2 runs; 5 held-back × 2)
+
+| Step | Haiku exact match |
+|---|---|
+| Baseline | 76.0% |
+| + season dates | 92.0% |
+| + named days | 94.0% |
+| + time-zone hemisphere | 96.0% |
+| + no questions for ambiguous places | 98.0% |
+
+| Model (final prompt `6c1c47fd3a50`) | Dev | Held-back | p95 latency | Cost per query |
+|---|---|---|---|---|
+| Haiku 4.5 | 98.0% | 100% | 4.76 s | $0.0066 |
+| Sonnet 5.5 | 100.0% | 100% | 8.61 s | $0.0156 |
+
+**Decision:** ship Haiku (the app already uses `ClaudeModel.haiku`). Its only miss is one run of "photos from Springfield", where neither answer hurts the user. Sonnet costs 2.4× more and its p95 is almost 4 s slower.
+
+**Notes**
+- The failures fell into groups as the guide predicted: date reasoning (5 of 6 baseline failures) and place ambiguity (1). No wrong tools, schema errors or refusals.
+- The held-back cases had no baseline-prompt run, so they confirm that the tuned prompt holds on unseen phrasings, not how big the gain is. That's 5 cases, so a small sample.
+- The longer prompt adds 14% input tokens (about $0.0006 per query). Prompt caching of the system prompt and tools is the obvious next saving.
+- The eval runs for Day 8 cost about $2.30 in total.
+
+**Interview answer:** "How did you decide which model to ship?" With numbers from the same evals, on the same prompt. I first improved the prompt on the cheap model, one change at a time, from 76% to 98%. Then I ran both models: Haiku 98% at $0.0066 per query with a 4.8 s p95, Sonnet 100% at $0.0156 with an 8.6 s p95. The remaining gap is one run of one genuinely ambiguous query, and the held-back cases pass on both. So Sonnet would buy almost nothing users would notice, at 2.4× the cost and slower searches, which they would notice. I shipped Haiku and kept the eval suite, so if a larger dataset ever shows a real gap, switching is one enum case and a re-run.
+
 ## Open items
 
 - Haiku once read "last winter" as December 2024–February 2025 (on 2026-10-02 the answer is December 2025–February 2026); another run of the same query got it right. Covered by eval cases `rel-02`, `rel-03` and `typo-01`; one possible Day 8 fix is computing the season's dates in the system prompt.
 - Switching tabs mid-search cancels the search (`.task` ends when the view disappears) and runs it again when the user returns. That's acceptable, but it could keep running instead.
 - The bundle ID changed to `com.denisefremov.DejaViewPix` (commit `15bd751`). Simulators and devices that had the old build need photo access granted again and the API key re-entered, because Keychain items belong to the app ID. The iPhone 17 simulator (9D3D28C2…) has the seeded photos, photo access and the key.
-- Before Day 8 (comparing models): Opus 5.5 and Sonnet 5.5 always think, and their replies contain `thinking` blocks. `ContentBlock` decodes those as `.unknown`, which can't be encoded, so the second request of a tool loop would fail on those models. Keep unknown blocks as raw JSON and send them back unchanged.
