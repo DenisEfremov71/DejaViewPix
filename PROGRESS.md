@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 6 ✅ done (2026-10-02).** Next: **Day 7: the eval runner and unit tests.**
+**Day 7 ✅ done (2026-10-02).** Baseline on Haiku 4.5: 76% exact match, $0.006 per query. Next: **Day 8: improve and compare models.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -230,6 +230,54 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
 - The user's time zone sets the hemisphere when no place is named (`rel-07`). The current prompt doesn't do this yet, on purpose.
 
 **Interview answer:** "How did you build an eval set without labelling thousands of real photos?" By scoring the step that's uncertain, not the whole pipeline. The model's only job is to turn a sentence into search arguments. PhotoKit and the geocoder are deterministic and unit-tested. So each case is a query plus the arguments a careful person would choose, written before running anything, with matching rules decided up front (exact dates, coordinates within a distance, accepted alternatives for genuinely ambiguous queries). The cases cover one failure mode each rather than many phrasings of one, and the same query under different "today" and time-zone contexts shows whether the model reasons or pattern-matches. Five cases are held back and only run once at the end.
+
+## Day 7: The eval runner (done 2026-10-02)
+
+**Built**
+- Package targets:
+  - `EvalKit` (library): dataset decoding, scoring, `CannedLibrary`, `CachingGeocoder`, `EvalRunner`, `Report`
+  - `evals` (executable)
+  - `EvalKitTests`
+  - The app still links only `AlbumAI`.
+- `Dataset`/`ResolvedCase`: `Accepted<T>` decodes a value, `null` (must not be set) or `{"one_of": […]}`. A case's "now" is noon on its `today`, in its time zone.
+- `Scorer`:
+  - scores the first `search_photos` call that passed validation
+  - normalizes the arguments (`any` → nil, absent favorites → false, trimmed album)
+  - compares each field by the README rules, then checks the behavior (`search`, `no_photos`, `no_search`)
+  - lists the problems in words
+- `CannedLibrary`: 25 photos (the seed places, plus Victoria, Melbourne, Christmas 2024, last weekend, Hiking, Screenshots, Selfies). It filters by dates, media type, favorites, album and distance, and throws `albumNotFound` for unknown albums.
+- `CachingGeocoder`: wraps the real `PlaceGeocoder` (MapKit). Each string is looked up once per run, and the report includes every lookup.
+- `EvalRunner`: runs each case N times, 4 at a time, through the real `ToolLoop` and API. Each run's tool calls, answer, error and `QueryMetrics` are recorded. Status per case: pass, fail, or flaky (mixed).
+- `Report`: summary (cases passed/flaky/failed, exact-match rate, behavior and per-field accuracy, average and p95 latency by nearest rank, average rounds, tokens, cost per query, total), per-case table, and what each failing run searched for. Written as JSON and markdown.
+- `swift run evals [--model haiku|sonnet|opus] [--runs N] [--split dev|test|all] [--case ID]… [--concurrency N] [--no-save]`
+  - The key comes from `ANTHROPIC_API_KEY`, never the Keychain. Locally it's stored in the macOS login keychain under the service `anthropic-api-key-evals` and read with `security find-generic-password` at run time.
+  - The held-back cases run only with `--split test` or `all`.
+  - A prompt fingerprint (SHA-256 of the system prompt and tool definitions) is printed and saved.
+- 20 offline `EvalKitTests`: decoding, the committed dataset loading, each field rule, tolerance, extra filters, the first valid search only, the three behaviors, flaky aggregation, the summary and markdown, percentile, canned library filters, geocoder cache. `swift test` runs 107 tests in well under a second with no network.
+- The scripted-client loop tests the guide asks for already exist from Days 3–4: tool call → answer, invalid → corrected, tool error, round cap.
+
+**Baseline** (`evals/results/2026-10-02-1519-haiku-dev.{json,md}`, `claude-haiku-4-5-20251001`, prompt `aa9afa156ddd`, 25 dev cases × 2 runs):
+
+| Metric | Value |
+|---|---|
+| Cases passed / flaky / failed | 19 / 0 / 6 |
+| Exact match (runs) | 76.0% |
+| Behavior | 96.0% |
+| Dates / place / media type / favorites / album | 72.7% / 95.5% / 95.5% / 95.5% / 95.5% |
+| Latency average / p95 | 4.24 s / 6.84 s |
+| Rounds (average) | 2.46 |
+| Cost per query | $0.0060 (total $0.30) |
+
+**Failures, grouped by cause** (input for Day 8):
+- **Year off by one for seasons (4 cases, consistent across both runs):**
+  - "last summer" → 2025 instead of 2026 (`rel-01` once, `combo-01` twice)
+  - "last wintr" with typos → December 2024–February 2025 (`typo-01`)
+  - southern "last summer" (`rel-07`): the hemisphere was right but it searched December 2024–February 2025 instead of December 2025–February 2026
+  - `rel-01` run 1 also used astronomical dates (06-21 to 09-22).
+- **Holiday as a month (1 case):** "two Christmases ago" → all of December 2024 instead of December 24–26 (`rel-04`).
+- **Clarification instead of a guess (1 case):** "photos from Springfield" → no search and an empty answer, both runs (`amb-03`). This is a rule question as much as a model failure.
+
+**Interview answer:** "What's the difference between your unit tests and your evals, and why do you need both?" Unit tests check my code against a scripted model. They're deterministic, offline and fast, and they prove the loop, validation and scoring do what I intend in every edge case: invalid answers, tool errors, the round cap. Evals check the real model against expectations I wrote down. They cost money, vary between runs and take minutes, and they measure quality: does Haiku turn "last summer" into the right dates? I need both because they catch different failures. A unit test can't tell me the model is off by a year on seasons, and an eval can't tell me whether that's the model or a bug in my loop unless the loop is already proven by unit tests.
 
 ## Open items
 

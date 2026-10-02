@@ -97,3 +97,27 @@ Five cases are marked `"split": "test"`: `simple-05`, `rel-06`, `typo-03`, `comb
 `album-03`, one from each of five categories. **They aren't used while tuning.** The runner
 skips them unless asked to include them, and they are run once, at the end of Day 8, to
 check that the gains on the 25 dev cases are real.
+
+## Running
+
+```sh
+cd AlbumAI
+ANTHROPIC_API_KEY=… swift run evals                # 25 dev cases × 2 runs on Haiku
+swift run evals --model sonnet --runs 3            # another model, more runs
+swift run evals --case rel-07 --runs 5             # one case
+swift run evals --split test                       # the held-back cases: only at the end of Day 8
+```
+
+- The key comes from `ANTHROPIC_API_KEY`, never from the app's Keychain. To keep it out of
+  shell history, store it once in the macOS login keychain
+  (`security add-generic-password -a "$USER" -s anthropic-api-key-evals -w`, which prompts for
+  it) and run `ANTHROPIC_API_KEY=$(security find-generic-password -a "$USER" -s
+  anthropic-api-key-evals -w) swift run evals`.
+- Each case runs through the real tool loop and the real API, with a canned photo library
+  (`EvalKit/CannedLibrary.swift`) and Apple's geocoder, cached per run. A case **passes**
+  only if every run passes; one pass and one fail is **flaky**.
+- Results go to `evals/results/<date>-<time>-<model>-<split>.{json,md}`. The JSON has every
+  run's observed arguments, so failures can be read without running again. The prompt
+  fingerprint changes whenever the system prompt or a tool definition changes.
+- `swift test` never calls the API. The scoring rules have their own offline tests in
+  `Tests/EvalKitTests`.
