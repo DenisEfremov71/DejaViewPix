@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 3 🟡 built, awaiting the live check in the simulator (2026-10-02).** Next: verify "photos from Whistler last winter" end to end, then **Day 4: Structured output, validation and cost.**
+**Day 3 ✅ complete (2026-10-02).** Next: **Day 4: Structured output, validation and cost.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -66,7 +66,7 @@
 
 **Interview answer:** "Why is retrying mid-stream dangerous?" The user has already seen part of the reply, and a retry generates a new, different reply. Appending it would duplicate or garble the text, and the input tokens would be paid twice. The client retries only before the first event arrives. After that it surfaces the error and keeps the partial text, and the user decides whether to resend.
 
-## Day 3: PhotoKit search and the tool loop (built 2026-10-02)
+## Day 3: PhotoKit search and the tool loop (done 2026-10-02)
 
 **Built**
 - `JSONValue.swift`: any JSON value (Codable, literal-expressible), `decode(as:)`, compact sorted `jsonString`.
@@ -96,7 +96,7 @@
 - `scripts/seed-simulator-photos.swift`: generates 9 JPEGs with EXIF dates and GPS (Whistler in winter ×3, Whistler in summer, Vancouver, Squamish, Paris, Tofino, one without GPS) and runs `simctl addmedia booted`.
 - 56 tests in total. New ones cover: the Whistler round trip over a scripted client (the exact second and third request bodies, and Vancouver day boundaries), a failing tool returned as `is_error`, an unknown tool, bad input, several calls in one turn, the 5-round cap, `max_tokens`, cancellation inside a tool, input validation cases, JSONValue, tool block encoding, the PhotoKit predicate and place classification.
 
-**Verified:** `swift test` passes (56 tests), and the app builds without warnings. Not yet verified: the real query in the simulator.
+**Verified:** `swift test` passes (56 tests), and the app builds without warnings. In the simulator, "photos from Whistler last winter" ran end to end against the real API and photo library and returned real asset IDs.
 
 **Decisions**
 - The loop is non-streaming. Tool rounds are short and need the whole reply anyway; streaming the final answer can come later.
@@ -108,4 +108,4 @@
 
 ## Open items
 
-- Live check of Day 3 in the simulator: "photos from Whistler last winter" should call geocode_place, then search_photos with Dec 2025–Feb 2026 and about 15 km, and return the 3 winter Whistler photos.
+- None.
