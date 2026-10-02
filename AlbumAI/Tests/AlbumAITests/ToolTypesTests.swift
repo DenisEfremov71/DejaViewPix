@@ -105,3 +105,59 @@ struct PhotoKitMappingTests {
         #expect(Place.Kind.city.radiusMeters > Place.Kind.beach.radiusMeters)
     }
 }
+
+struct PricingTests {
+    private let table = PriceTable(models: [
+        "claude-haiku-4-5": ModelPrice(input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1),
+        "claude-opus-5-5": ModelPrice(input: 4, output: 20, cacheWrite: 5, cacheRead: 0.2),
+    ])
+
+    @Test func bundledTableHasTheModelsWeUse() throws {
+        let bundled = PriceTable.bundled
+        for model in [ClaudeModel.haiku, .sonnet, .opus] {
+            #expect(bundled.price(for: model.rawValue) != nil, "No price for \(model.rawValue)")
+        }
+        #expect(bundled.price(for: ClaudeModel.nonexisting.rawValue) == nil)
+    }
+
+    @Test func datedIDsMatchTheirAlias() {
+        #expect(table.price(for: "claude-haiku-4-5-20251001")?.input == 1)
+        #expect(table.price(for: "claude-haiku-4-5")?.input == 1)
+        #expect(table.price(for: "claude-haiku-4") == nil)
+    }
+
+    @Test func costCountsEveryTokenKind() {
+        let usage = Usage(inputTokens: 1_000_000, outputTokens: 100_000, cacheCreationInputTokens: 200_000, cacheReadInputTokens: 500_000)
+        // 1.00 + 0.50 + 0.25 + 0.05
+        #expect(abs(table.price(for: "claude-haiku-4-5")!.cost(of: usage) - 1.80) < 1e-9)
+    }
+
+    @Test func usageDecodesOptionalCacheFields() throws {
+        let plain = try JSONDecoder().decode(Usage.self, from: Data(#"{"input_tokens":5,"output_tokens":2}"#.utf8))
+        #expect(plain == Usage(inputTokens: 5, outputTokens: 2))
+
+        let cached = try JSONDecoder().decode(Usage.self, from: Data(
+            #"{"input_tokens":5,"output_tokens":2,"cache_creation_input_tokens":null,"cache_read_input_tokens":40}"#.utf8
+        ))
+        #expect(cached == Usage(inputTokens: 5, outputTokens: 2, cacheReadInputTokens: 40))
+    }
+
+    @Test func metricsSumRoundsIntoOneLogLine() {
+        let round = { (number: Int) in
+            ToolLoopRound(
+                number: number, model: "claude-haiku-4-5-20251001", stopReason: "tool_use",
+                usage: Usage(inputTokens: 1_200, outputTokens: 80), latency: .milliseconds(900),
+                text: "", toolCalls: []
+            )
+        }
+        let metrics = QueryMetrics(model: "ignored", rounds: [round(1), round(2), round(3)], latency: .milliseconds(4_210), prices: table)
+
+        #expect(metrics.usage == Usage(inputTokens: 3_600, outputTokens: 240))
+        #expect(metrics.logLine(outcome: "ok, 3 photos")
+            == "claude-haiku-4-5-20251001 · 3 rounds · 4.21 s · 3600 in / 240 out tokens · $0.004800 · ok, 3 photos")
+
+        let unknown = QueryMetrics(model: "claude-nope", rounds: [], latency: .zero, prices: table)
+        #expect(unknown.cost == nil)
+        #expect(unknown.logLine(outcome: "error").contains("cost unknown"))
+    }
+}

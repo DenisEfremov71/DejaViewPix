@@ -2,7 +2,7 @@
 
 ## Current status
 
-**Day 3 ✅ complete (2026-10-02).** Next: **Day 4: Structured output, validation and cost.**
+**Day 4 🟡 built, awaiting the live check in the simulator (2026-10-02).** Next: check a few real queries (validated result plus one usage line in the console), then **Day 5: The SwiftUI experience.**
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -106,6 +106,52 @@
 
 **Interview answer:** "Walk me through one tool-calling round trip. What exactly goes into the second request?" The second request carries the same model, system prompt and tools. Its messages are: the original user message; Claude's assistant message unchanged, with its text and `tool_use` blocks (id, name, input); then a new user message with one `tool_result` block per `tool_use`, matched by `tool_use_id`, with the tool's output as content and `is_error: true` on failures. The API is stateless, so the whole conversation is resent each round, and input tokens grow with every round.
 
+## Day 4: Structured output, validation and cost (built 2026-10-02)
+
+**Built**
+- `present_results` tool (`SearchAnswer.toolDefinition`): `summary` plus `photo_ids`, `strict: true`, `tool_choice` left at `auto`. The system prompt tells Claude to always finish with it.
+- `SearchAnswer` (summary, photo IDs, filters) and `AppliedFilters`, with a readable `label`.
+- `SearchAnswer.validated(input:calls:)`:
+  - non-empty summary
+  - duplicate IDs dropped
+  - every ID must appear in a successful `search_photos` result; otherwise the error names the invented IDs
+- Applied filters are rebuilt from the `search_photos` calls that produced the presented photos (all successful searches when nothing matched). Defaults are filled in, and the place name comes from the `geocode_place` result with matching coordinates. The model never reports filters.
+- Loop changes:
+  - It ends on a valid `present_results` call.
+  - One correction is allowed: an invalid answer goes back as `tool_result` with `is_error: true`, and a prose `end_turn` gets a one-line user nudge. A second bad ending throws `ToolLoopError.invalidAnswer` or `.noAnswer`.
+  - `present_results` alongside other tools in the same turn gets an error result.
+  - `onRound` now fires before every throw, so failed searches can still be costed.
+- `Usage` decodes the cache token fields (missing or null count as 0) and has `+`. `MessageResponse.model` is decoded, and `ToolDefinition.strict` is sent only when set.
+- Price table in config: `AlbumAI/Sources/AlbumAI/Resources/pricing.json`, a package resource that ships in the app as `AlbumAI_AlbumAI.bundle`.
+  - Copied from the official pricing page on 2026-10-02, in USD per million tokens (input / output / 5-min cache write / cache read): Haiku 4.5 1 / 5 / 1.25 / 0.10, Sonnet 5.5 2 / 10 / 2.50 / 0.20, Opus 5.5 4 / 20 / 5 / 0.20.
+  - `PriceTable.price(for:)` matches dated IDs to their alias, so `claude-haiku-4-5-20251001` uses the `claude-haiku-4-5` row.
+- `QueryMetrics`: model (as reported by the API), rounds, wall-clock latency, summed tokens and cost.
+  - `logLine(outcome:)` produces, e.g., `claude-haiku-4-5-20251001 · 3 rounds · 4.21 s · 3600 in / 240 out tokens · $0.004800 · ok, 3 photos`.
+- App:
+  - logs that line once per query with OSLog `notice` (successes, errors and cancellations); the query text is `.private`
+  - shows the summary, the applied filters, the thumbnails and the cost
+- 70 tests. New ones cover: the Whistler run ending in `present_results` with rebuilt filters and place name, an invented ID corrected once, a second invalid answer failing, IDs with no successful search, an empty summary, a prose ending nudged once, a second prose ending failing, `present_results` mixed with other tools, filters taken only from contributing searches, `strict` encoding, the price table and alias matching, cost across all token kinds, cache fields decoding, and the log line.
+
+**Verified:** `swift test` passes (70 tests), the app builds without warnings, and `pricing.json` is in the app bundle. Not yet verified: real queries in the simulator.
+
+**Decisions**
+- **A `present_results` tool instead of `output_config.format`.** Native structured output is GA (no beta header) on Haiku 4.5, Sonnet 5.5 and Opus 5.5, and it works alongside tools (only the final text is constrained). The tool was chosen because:
+  - The correction step stays inside the tool protocol: the error goes back as a `tool_result` tied to that call.
+  - The answer is a tool call like the searches, so one loop handles everything.
+  - It works the same on all three Day 8 models.
+  - The cost: Opus 5.5 and Sonnet 5.5 reject a forced `tool_choice` (`any`/`tool`) with a 400, so the loop can't force the call. Claude can end in prose instead, which the nudge covers. `strict: true` still guarantees the input shape whenever the tool is called.
+- The date-order check (`date_from` on or before `date_to`) is enforced where the search runs (`search_photos` input validation, Day 3), and the reported filters come only from calls that passed it. The final-answer check therefore focuses on what a schema can't catch: IDs that no search returned.
+- Cost counts every round of the conversation, including the correction round. A failed search is still logged with its cost.
+
+**Interview answer:** "How do you stop a model from returning photo IDs that don't exist?" The model never gets the last word on IDs:
+1. Every `search_photos` result is recorded on the client.
+2. The final answer arrives through a strict `present_results` tool, so its shape is guaranteed.
+3. Each returned ID is checked against the set of IDs that successful searches actually produced.
+4. Unknown IDs go back once as an `is_error` `tool_result` naming them, so the model can correct itself. A second failure is a clean error, never a grid of made-up photos.
+
+The filters shown to the user are rebuilt from the tool calls that ran, not taken from the model's description of what it did.
+
 ## Open items
 
-- None.
+- Live check of Day 4 in the simulator: run a few queries and confirm the validated result in the UI and one usage line per query in the Xcode console (`search … · claude-haiku-4-5-… · N rounds · … · $…`).
+- Before Day 8 (comparing models): Opus 5.5 and Sonnet 5.5 always think, and their replies contain `thinking` blocks. `ContentBlock` decodes those as `.unknown`, which can't be encoded, so the second request of a tool loop would fail on those models. Keep unknown blocks as raw JSON and send them back unchanged.

@@ -24,8 +24,8 @@ public enum SearchPrompt {
         - When the user names an album, call list_albums unless you already know its exact title.
         - Only set filters the user asked for. Don't add a location, date or media type they didn't mention.
         - If a search finds nothing, you may retry once with a wider date range or radius, and say so.
-        - Finish with one or two short sentences saying what you found. Don't list photo IDs; \
-        the app shows the photos.
+        - Always finish by calling present_results, even when nothing matched. Its photo_ids must \
+        be copied from search_photos results.
         """
     }
 
@@ -46,6 +46,10 @@ public enum ToolLoopError: LocalizedError, Sendable, Equatable {
     case roundLimitReached(Int)
     /// The reply stopped for a reason other than `end_turn` or `tool_use`.
     case unexpectedStop(String?)
+    /// The final answer failed validation twice. The message is the second failure.
+    case invalidAnswer(String)
+    /// Claude ended its turn twice without calling present_results.
+    case noAnswer
 
     public var errorDescription: String? {
         switch self {
@@ -57,6 +61,10 @@ public enum ToolLoopError: LocalizedError, Sendable, Equatable {
             "The reply hit the max_tokens limit before it finished."
         case .unexpectedStop(let reason):
             "The reply stopped unexpectedly (stop reason: \(reason ?? "none"))."
+        case .invalidAnswer(let message):
+            "Claude's answer was still invalid after one correction. \(message)"
+        case .noAnswer:
+            "Claude finished without presenting any results."
         }
     }
 }
@@ -67,45 +75,44 @@ public struct ToolCallRecord: Sendable, Equatable {
     public var name: String
     public var input: JSONValue
     public var output: ToolOutput
+
+    public init(id: String, name: String, input: JSONValue, output: ToolOutput) {
+        self.id = id
+        self.name = name
+        self.input = input
+        self.output = output
+    }
 }
 
 /// One request/response round trip.
 public struct ToolLoopRound: Sendable, Equatable {
     public var number: Int
+    /// The model that answered, as reported by the API.
+    public var model: String?
     public var stopReason: String?
     public var usage: Usage
     public var latency: Duration
     /// The text Claude wrote alongside its tool calls, if any.
     public var text: String
+    /// Every tool call in this round, present_results included.
     public var toolCalls: [ToolCallRecord]
 }
 
 public struct ToolLoopResult: Sendable, Equatable {
-    public var finalText: String
+    public var answer: SearchAnswer
     public var rounds: [ToolLoopRound]
-    /// The whole conversation, ending with Claude's final message.
+    /// The whole conversation, ending with the present_results call.
     public var messages: [Message]
 
-    /// Photo IDs from every successful search, without duplicates, in the order returned.
-    public var photoIDs: [String] {
-        var seen = Set<String>()
-        return rounds
-            .flatMap(\.toolCalls)
-            .filter { !$0.output.isError }
-            .flatMap(\.output.photoIDs)
-            .filter { seen.insert($0).inserted }
-    }
-
     public var usage: Usage {
-        Usage(
-            inputTokens: rounds.map(\.usage.inputTokens).reduce(0, +),
-            outputTokens: rounds.map(\.usage.outputTokens).reduce(0, +)
-        )
+        rounds.map(\.usage).reduce(.zero, +)
     }
 }
 
 /// Runs the tool-calling loop: send the conversation, run the tools Claude asks for, send
-/// the results back, and repeat until Claude ends its turn or `maxRounds` requests are spent.
+/// the results back, and repeat until Claude presents a valid answer or `maxRounds` requests
+/// are spent. One bad ending (an invalid answer, or no answer) gets a correction; a second
+/// one fails the search.
 public struct ToolLoop: Sendable {
     public let client: any MessageSending
     public let tools: any ToolExecuting
@@ -117,7 +124,8 @@ public struct ToolLoop: Sendable {
         self.maxRounds = maxRounds
     }
 
-    /// - Parameter onRound: Called after each round, e.g. to show progress.
+    /// - Parameter onRound: Called after each round, including the last one before an error,
+    ///   so callers can log usage for failed searches too.
     public func run(
         _ query: String,
         system: String,
@@ -125,15 +133,14 @@ public struct ToolLoop: Sendable {
     ) async throws -> ToolLoopResult {
         var messages: [Message] = [.user(query)]
         var rounds: [ToolLoopRound] = []
+        var calls: [ToolCallRecord] = []
+        var correctionUsed = false
+        let definitions = tools.definitions + [SearchAnswer.toolDefinition]
         let clock = ContinuousClock()
 
         for number in 1...maxRounds {
             let start = clock.now
-            let response = try await client.createMessage(
-                system: system,
-                messages: messages,
-                tools: tools.definitions
-            )
+            let response = try await client.createMessage(system: system, messages: messages, tools: definitions)
             let latency = start.duration(to: clock.now)
 
             // The assistant turn goes back exactly as received, tool_use blocks included.
@@ -141,6 +148,7 @@ public struct ToolLoop: Sendable {
 
             var round = ToolLoopRound(
                 number: number,
+                model: response.model,
                 stopReason: response.stopReason,
                 usage: response.usage,
                 latency: latency,
@@ -149,22 +157,73 @@ public struct ToolLoop: Sendable {
             )
 
             switch response.stopReason {
-            case "end_turn", "stop_sequence":
-                rounds.append(round)
-                await onRound(round)
-                return ToolLoopResult(finalText: response.text, rounds: rounds, messages: messages)
             case "tool_use" where !response.toolUses.isEmpty:
                 break
+
+            case "end_turn", "stop_sequence":
+                // Claude answered in prose instead of calling present_results.
+                rounds.append(round)
+                await onRound(round)
+                if correctionUsed {
+                    throw ToolLoopError.noAnswer
+                }
+                correctionUsed = true
+                messages.append(.user(
+                    "Please call present_results with your answer. Use an empty photo_ids list if nothing matched."
+                ))
+                continue
+
             default:
+                rounds.append(round)
+                await onRound(round)
                 throw ToolLoopError.unexpectedStop(response.stopReason)
             }
 
             // One tool_result per tool_use, in the same order, all in one user message.
             var results: [ContentBlock] = []
             for call in response.toolUses {
-                let output = try await execute(name: call.name, input: call.input)
+                let output: ToolOutput
+                if call.name == SearchAnswer.toolName {
+                    guard response.toolUses.count == 1 else {
+                        output = ToolOutput(
+                            content: "Call present_results on its own, after the other tools have returned.",
+                            isError: true
+                        )
+                        round.toolCalls.append(ToolCallRecord(id: call.id, name: call.name, input: call.input, output: output))
+                        results.append(.toolResult(toolUseID: call.id, content: output.content, isError: true))
+                        continue
+                    }
+                    do {
+                        let answer = try SearchAnswer.validated(input: call.input, calls: calls)
+                        round.toolCalls.append(ToolCallRecord(
+                            id: call.id, name: call.name, input: call.input,
+                            output: ToolOutput(content: "OK", photoIDs: answer.photoIDs)
+                        ))
+                        rounds.append(round)
+                        await onRound(round)
+                        return ToolLoopResult(answer: answer, rounds: rounds, messages: messages)
+                    } catch {
+                        let message = error.localizedDescription
+                        if correctionUsed {
+                            round.toolCalls.append(ToolCallRecord(
+                                id: call.id, name: call.name, input: call.input,
+                                output: ToolOutput(content: message, isError: true)
+                            ))
+                            rounds.append(round)
+                            await onRound(round)
+                            throw ToolLoopError.invalidAnswer(message)
+                        }
+                        correctionUsed = true
+                        output = ToolOutput(content: message, isError: true)
+                    }
+                } else {
+                    output = try await execute(name: call.name, input: call.input)
+                }
+
+                let record = ToolCallRecord(id: call.id, name: call.name, input: call.input, output: output)
+                round.toolCalls.append(record)
+                calls.append(record)
                 results.append(.toolResult(toolUseID: call.id, content: output.content, isError: output.isError))
-                round.toolCalls.append(ToolCallRecord(id: call.id, name: call.name, input: call.input, output: output))
             }
             messages.append(Message(role: .user, content: results))
 

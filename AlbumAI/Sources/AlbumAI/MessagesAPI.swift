@@ -138,47 +138,85 @@ public struct ToolDefinition: Codable, Sendable, Equatable {
     public var name: String
     public var description: String
     public var inputSchema: JSONValue
+    /// When true, the API guarantees `tool_use` inputs match the schema. Omitted when nil.
+    public var strict: Bool?
 
-    public init(name: String, description: String, inputSchema: JSONValue) {
+    public init(name: String, description: String, inputSchema: JSONValue, strict: Bool? = nil) {
         self.name = name
         self.description = description
         self.inputSchema = inputSchema
+        self.strict = strict
     }
 
     private enum CodingKeys: String, CodingKey {
-        case name, description
+        case name, description, strict
         case inputSchema = "input_schema"
     }
 }
 
 public struct Usage: Codable, Sendable, Equatable {
+    /// Input tokens not read from or written to the prompt cache.
     public var inputTokens: Int
     public var outputTokens: Int
+    public var cacheCreationInputTokens: Int
+    public var cacheReadInputTokens: Int
 
-    public init(inputTokens: Int, outputTokens: Int) {
+    public init(
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheCreationInputTokens: Int = 0,
+        cacheReadInputTokens: Int = 0
+    ) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
+        self.cacheCreationInputTokens = cacheCreationInputTokens
+        self.cacheReadInputTokens = cacheReadInputTokens
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        // The cache fields are absent or null when caching isn't used.
+        cacheCreationInputTokens = try container.decodeIfPresent(Int.self, forKey: .cacheCreationInputTokens) ?? 0
+        cacheReadInputTokens = try container.decodeIfPresent(Int.self, forKey: .cacheReadInputTokens) ?? 0
+    }
+
+    public static let zero = Usage(inputTokens: 0, outputTokens: 0)
+
+    public static func + (lhs: Usage, rhs: Usage) -> Usage {
+        Usage(
+            inputTokens: lhs.inputTokens + rhs.inputTokens,
+            outputTokens: lhs.outputTokens + rhs.outputTokens,
+            cacheCreationInputTokens: lhs.cacheCreationInputTokens + rhs.cacheCreationInputTokens,
+            cacheReadInputTokens: lhs.cacheReadInputTokens + rhs.cacheReadInputTokens
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case cacheCreationInputTokens = "cache_creation_input_tokens"
+        case cacheReadInputTokens = "cache_read_input_tokens"
     }
 }
 
 public struct MessageResponse: Decodable, Sendable, Equatable {
+    /// The model that answered, e.g. "claude-haiku-4-5-20251001".
+    public var model: String?
     public var content: [ContentBlock]
     public var stopReason: String?
     public var usage: Usage
 
-    public init(content: [ContentBlock], stopReason: String?, usage: Usage) {
+    public init(model: String? = nil, content: [ContentBlock], stopReason: String?, usage: Usage) {
+        self.model = model
         self.content = content
         self.stopReason = stopReason
         self.usage = usage
     }
 
     private enum CodingKeys: String, CodingKey {
-        case content, usage
+        case model, content, usage
         case stopReason = "stop_reason"
     }
 

@@ -18,14 +18,17 @@ struct PhotoSearchView: View {
     @State private var query = ""
     @State private var rounds: [ToolLoopRound] = []
     @State private var result: ToolLoopResult?
+    @State private var metrics: QueryMetrics?
     @State private var errorMessage: String?
     @State private var searchTask: Task<Void, Never>?
     @FocusState private var isQueryFocused: Bool
 
     private static let log = Logger(subsystem: "DejaViewPix", category: "search")
 
+    private static let model = ClaudeModel.haiku
+
     private let loop = ToolLoop(
-        client: ClaudeClient(apiKey: { try APIKeyStore.claude.load() }),
+        client: ClaudeClient(model: Self.model, apiKey: { try APIKeyStore.claude.load() }),
         tools: PhotoTools(library: PhotoLibrary(), geocoder: PlaceGeocoder(), timeZone: .current)
     )
 
@@ -76,6 +79,12 @@ struct PhotoSearchView: View {
 
                 if let result {
                     resultView(result)
+                }
+
+                if let metrics {
+                    Text(Self.metricsLabel(metrics))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding()
@@ -149,6 +158,7 @@ struct PhotoSearchView: View {
         let query = query
         rounds = []
         result = nil
+        metrics = nil
         errorMessage = nil
 
         searchTask = Task {
@@ -163,8 +173,11 @@ struct PhotoSearchView: View {
             }
 
             let system = SearchPrompt.system(now: .now, timeZone: .current)
+            let clock = ContinuousClock()
+            let start = clock.now
+            let outcome: String
             do {
-                result = try await loop.run(query, system: system) { @MainActor round in
+                let result = try await loop.run(query, system: system) { @MainActor round in
                     rounds.append(round)
                     for call in round.toolCalls {
                         Self.log.debug("""
@@ -173,11 +186,20 @@ struct PhotoSearchView: View {
                             """)
                     }
                 }
+                self.result = result
+                outcome = "ok, \(result.answer.photoIDs.count) photos"
             } catch is CancellationError {
                 errorMessage = "Search cancelled."
+                outcome = "cancelled"
             } catch {
                 errorMessage = error.localizedDescription
+                outcome = "error: \(error.localizedDescription)"
             }
+
+            // One usage line per query, failed ones included: they cost money too.
+            let metrics = QueryMetrics(model: Self.model.rawValue, rounds: rounds, latency: start.duration(to: clock.now))
+            self.metrics = metrics
+            Self.log.notice("search \(query, privacy: .private) · \(metrics.logLine(outcome: outcome), privacy: .public)")
         }
     }
 
@@ -207,19 +229,28 @@ struct PhotoSearchView: View {
 
     private func resultView(_ result: ToolLoopResult) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(result.finalText)
+            Text(result.answer.summary)
                 .textSelection(.enabled)
 
-            Text("\(result.photoIDs.count) photos · \(result.rounds.count) rounds · \(result.usage.inputTokens) in / \(result.usage.outputTokens) out tokens")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            // Rebuilt from the searches that ran, not from the model's description.
+            ForEach(Array(result.answer.filters.enumerated()), id: \.offset) { _, filters in
+                Label(filters.label, systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 4)], spacing: 4) {
-                ForEach(result.photoIDs, id: \.self) { id in
+                ForEach(result.answer.photoIDs, id: \.self) { id in
                     AssetThumbnail(id: id)
                 }
             }
         }
+    }
+
+    nonisolated private static func metricsLabel(_ metrics: QueryMetrics) -> String {
+        let cost = metrics.cost.map { $0.formatted(.currency(code: "USD").precision(.fractionLength(4))) } ?? "cost unknown"
+        return "\(metrics.rounds) rounds · \(format(metrics.latency)) · "
+            + "\(metrics.usage.inputTokens) in / \(metrics.usage.outputTokens) out tokens · \(cost)"
     }
 
     nonisolated private static func format(_ duration: Duration) -> String {

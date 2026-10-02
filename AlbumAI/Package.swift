@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "AlbumAI", targets: ["AlbumAI"]),
     ],
     targets: [
-        .target(name: "AlbumAI"),
+        .target(name: "AlbumAI", resources: [.process("Resources")]),
         .testTarget(name: "AlbumAITests", dependencies: ["AlbumAI"]),
     ]
 )

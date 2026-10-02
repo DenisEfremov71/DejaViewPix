@@ -88,7 +88,16 @@ private func date(_ iso: String) -> Date {
 }
 
 private func reply(_ blocks: ContentBlock..., stop: String = "tool_use") -> MessageResponse {
-    MessageResponse(content: blocks, stopReason: stop, usage: Usage(inputTokens: 100, outputTokens: 20))
+    MessageResponse(
+        model: "claude-haiku-4-5-20251001",
+        content: blocks,
+        stopReason: stop,
+        usage: Usage(inputTokens: 100, outputTokens: 20)
+    )
+}
+
+private func present(_ summary: String, _ ids: [String], id: String = "toolu_9") -> ContentBlock {
+    .toolUse(id: id, name: "present_results", input: ["summary": .string(summary), "photo_ids": .array(ids.map { .string($0) })])
 }
 
 private let whistler = Place(name: "Whistler, BC, Canada", latitude: 50.116_32, longitude: -122.957_36, kind: .city)
@@ -110,7 +119,7 @@ struct ToolLoopTests {
         let client = ScriptedClient([
             reply(.text("Let me find Whistler first."), geocodeCall),
             reply(searchCall),
-            reply(.text("I found 2 photos from Whistler last winter."), stop: "end_turn"),
+            reply(present("2 photos from Whistler last winter.", ["B/L0/001", "A/L0/001"])),
         ])
         let library = FakeLibrary(result: PhotoSearchResult(matches: [
             PhotoMatch(id: "A/L0/001", creationDate: date("2026-01-14T18:30:00Z"), distanceMeters: 1_234),
@@ -125,14 +134,23 @@ struct ToolLoopTests {
 
         let result = try await ToolLoop(client: client, tools: tools).run("photos from Whistler last winter", system: system)
 
-        #expect(result.finalText == "I found 2 photos from Whistler last winter.")
-        #expect(result.photoIDs == ["A/L0/001", "B/L0/001"])
-        #expect(result.rounds.map(\.toolCalls.count) == [1, 1, 0])
+        #expect(result.answer == SearchAnswer(
+            summary: "2 photos from Whistler last winter.",
+            photoIDs: ["B/L0/001", "A/L0/001"],
+            filters: [AppliedFilters(
+                dateFrom: "2025-12-01",
+                dateTo: "2026-02-28",
+                near: GeoCircle(latitude: 50.1163, longitude: -122.9574, radiusMeters: 15_000),
+                place: "Whistler, BC, Canada"
+            )]
+        ))
+        #expect(result.rounds.map(\.toolCalls.count) == [1, 1, 1])
         #expect(result.usage == Usage(inputTokens: 300, outputTokens: 60))
 
         let requests = await client.requests
         #expect(requests.count == 3)
-        #expect(requests.allSatisfy { $0.system == system && $0.tools.count == 3 })
+        #expect(requests.allSatisfy { $0.system == system })
+        #expect(requests[0].tools.map(\.name) == ["search_photos", "geocode_place", "list_albums", "present_results"])
 
         // Second request: user, the assistant message unchanged, then the tool result.
         let second = requests[1].messages
@@ -163,13 +181,14 @@ struct ToolLoopTests {
     @Test func failingToolGoesBackAsErrorAndLoopContinues() async throws {
         let client = ScriptedClient([
             reply(.toolUse(id: "toolu_1", name: "geocode_place", input: ["place": "Atlantis"])),
-            reply(.text("I couldn't find that place."), stop: "end_turn"),
+            reply(present("I couldn't find that place.", [])),
         ])
         let tools = PhotoTools(library: FakeLibrary(), geocoder: FakeGeocoder(), timeZone: vancouver)
 
         let result = try await ToolLoop(client: client, tools: tools).run("Atlantis", system: "")
 
-        #expect(result.finalText == "I couldn't find that place.")
+        #expect(result.answer.summary == "I couldn't find that place.")
+        #expect(result.answer.photoIDs.isEmpty)
         let sent = await client.requests[1].messages[2]
         #expect(sent == Message(role: .user, content: [.toolResult(
             toolUseID: "toolu_1",
@@ -185,7 +204,7 @@ struct ToolLoopTests {
                 .toolUse(id: "toolu_2", name: "delete_photos", input: [:]),
                 .toolUse(id: "toolu_3", name: "search_photos", input: ["date_from": "last winter"])
             ),
-            reply(.text("Done."), stop: "end_turn"),
+            reply(present("Nothing found.", [])),
         ])
         let library = FakeLibrary(error: ToolError.albumNotFound("Nope"))
         let tools = PhotoTools(library: library, geocoder: FakeGeocoder(), timeZone: vancouver)
@@ -199,7 +218,7 @@ struct ToolLoopTests {
         #expect(calls[0].output.content == ToolError.albumNotFound("Nope").localizedDescription)
         #expect(calls[1].output.content == #"There is no tool named "delete_photos"."#)
         #expect(calls[2].output.content.contains("YYYY-MM-DD"))
-        #expect(result.photoIDs.isEmpty)
+        #expect(result.answer.filters.isEmpty)
 
         let sent = await client.requests[1].messages[2].content
         #expect(sent.count == 3)
@@ -215,19 +234,22 @@ struct ToolLoopTests {
         #expect(await client.counter.value == 5)
     }
 
-    @Test func unexpectedStopReasonThrows() async throws {
+    @Test func unexpectedStopReasonThrowsAfterReportingTheRound() async throws {
         let client = ScriptedClient([reply(.text("Partial"), stop: "max_tokens")])
         let tools = PhotoTools(library: FakeLibrary(), geocoder: FakeGeocoder(), timeZone: vancouver)
+        let reported = RoundCollector()
 
         await #expect(throws: ToolLoopError.unexpectedStop("max_tokens")) {
-            try await ToolLoop(client: client, tools: tools).run("q", system: "")
+            try await ToolLoop(client: client, tools: tools).run("q", system: "") { await reported.add($0) }
         }
+        // Usage of a failed search can still be logged.
+        #expect(await reported.rounds.map(\.usage) == [Usage(inputTokens: 100, outputTokens: 20)])
     }
 
     @Test func cancellationInsideToolIsNotSentToClaude() async throws {
         let client = ScriptedClient([
             reply(.toolUse(id: "toolu_1", name: "search_photos", input: [:])),
-            reply(.text("Done."), stop: "end_turn"),
+            reply(present("Done.", [])),
         ])
         let tools = PhotoTools(library: FakeLibrary(error: CancellationError()), geocoder: FakeGeocoder(), timeZone: vancouver)
 
@@ -247,6 +269,137 @@ struct ToolLoopTests {
         let output = try await tools.execute(name: "list_albums", input: [:])
 
         #expect(output.content == #"{"albums":[{"count":42,"title":"Ski trip"},{"count":3,"smart":true,"title":"Selfies"}]}"#)
+    }
+}
+
+// MARK: - Final answer
+
+actor RoundCollector {
+    private(set) var rounds: [ToolLoopRound] = []
+    func add(_ round: ToolLoopRound) { rounds.append(round) }
+}
+
+struct FinalAnswerTests {
+    private let search = ContentBlock.toolUse(id: "toolu_1", name: "search_photos", input: ["date_from": "2026-01-01"])
+    private let library = FakeLibrary(result: PhotoSearchResult(matches: [
+        PhotoMatch(id: "A/L0/001", creationDate: nil),
+        PhotoMatch(id: "B/L0/001", creationDate: nil),
+    ], hasMore: false))
+
+    private func run(_ responses: MessageResponse...) async throws -> (ToolLoopResult, ScriptedClient) {
+        let client = ScriptedClient(responses)
+        let tools = PhotoTools(library: library, geocoder: FakeGeocoder(), timeZone: vancouver)
+        return (try await ToolLoop(client: client, tools: tools).run("q", system: ""), client)
+    }
+
+    @Test func presentResultsIsStrict() throws {
+        let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(SearchAnswer.toolDefinition))
+        #expect(json["strict"] == true)
+        #expect(json["input_schema"]?["required"] == ["summary", "photo_ids"])
+        #expect(json["input_schema"]?["additionalProperties"] == false)
+    }
+
+    @Test func inventedIDGetsOneCorrection() async throws {
+        let (result, client) = try await run(
+            reply(search),
+            reply(present("Found 2.", ["A/L0/001", "Z/L0/999"], id: "toolu_2")),
+            reply(present("Found 1.", ["A/L0/001"], id: "toolu_3"))
+        )
+
+        #expect(result.answer.photoIDs == ["A/L0/001"])
+        let correction = try #require(await client.requests.last?.messages.last)
+        guard case .toolResult("toolu_2", let content, true)? = correction.content.first else {
+            Issue.record("Expected an error tool_result for toolu_2, got \(correction)")
+            return
+        }
+        #expect(content.contains("\"Z/L0/999\""))
+    }
+
+    @Test func secondInvalidAnswerFails() async throws {
+        await #expect(throws: ToolLoopError.self) {
+            try await run(
+                reply(search),
+                reply(present("Found.", ["Z/L0/999"], id: "toolu_2")),
+                reply(present("Found.", ["Z/L0/998"], id: "toolu_3"))
+            )
+        }
+    }
+
+    @Test func idsFromAFailedSearchAreRejected() async throws {
+        // An ID that only appears in the model's imagination, with no successful search at all.
+        await #expect(throws: ToolLoopError.invalidAnswer(
+            ToolError.invalidInput(
+                #"These photo_ids were not returned by any search_photos call: "A/L0/001". Use only IDs copied from search_photos results."#
+            ).localizedDescription
+        )) {
+            try await run(
+                reply(present("Found.", ["A/L0/001"], id: "toolu_2")),
+                reply(present("Found.", ["A/L0/001"], id: "toolu_3"))
+            )
+        }
+    }
+
+    @Test func emptySummaryIsRejected() throws {
+        #expect(throws: ToolError.self) {
+            try SearchAnswer.validated(input: ["summary": "  ", "photo_ids": []], calls: [])
+        }
+    }
+
+    @Test func proseEndingGetsOneNudge() async throws {
+        let (result, client) = try await run(
+            reply(search),
+            reply(.text("I found 2 photos."), stop: "end_turn"),
+            reply(present("Found 2.", ["A/L0/001", "B/L0/001"]))
+        )
+
+        #expect(result.answer.photoIDs == ["A/L0/001", "B/L0/001"])
+        let nudge = try #require(await client.requests.last?.messages.last)
+        #expect(nudge.role == .user)
+        #expect(nudge.content.first.map { if case .text(let text) = $0 { text.contains("present_results") } else { false } } == true)
+    }
+
+    @Test func secondProseEndingFails() async throws {
+        await #expect(throws: ToolLoopError.noAnswer) {
+            try await run(
+                reply(.text("Nothing."), stop: "end_turn"),
+                reply(.text("Still nothing."), stop: "end_turn")
+            )
+        }
+    }
+
+    @Test func presentResultsAlongsideOtherToolsIsAnError() async throws {
+        let (result, _) = try await run(
+            reply(search, present("Early.", ["A/L0/001"], id: "toolu_2")),
+            reply(present("Found.", ["A/L0/001"], id: "toolu_3"))
+        )
+
+        let first = try #require(result.rounds.first?.toolCalls)
+        #expect(first.map(\.output.isError) == [false, true])
+        #expect(result.answer.photoIDs == ["A/L0/001"])
+    }
+
+    @Test func filtersComeOnlyFromSearchesThatProducedThePhotos() throws {
+        let calls = [
+            ToolCallRecord(
+                id: "1", name: "search_photos", input: ["date_from": "2026-01-01", "media_type": "any"],
+                output: ToolOutput(content: "{}", photoIDs: ["A"])
+            ),
+            ToolCallRecord(
+                id: "2", name: "search_photos", input: ["favorites_only": true, "limit": 500, "sort": "oldest_first"],
+                output: ToolOutput(content: "{}", photoIDs: ["B"])
+            ),
+            ToolCallRecord(
+                id: "3", name: "search_photos", input: ["album": "Ski trip"],
+                output: ToolOutput(content: "No album", isError: true)
+            ),
+        ]
+
+        let answer = try SearchAnswer.validated(input: ["summary": "Two.", "photo_ids": ["B", "B"]], calls: calls)
+
+        #expect(answer.photoIDs == ["B"])
+        #expect(answer.filters == [AppliedFilters(favoritesOnly: true, sort: "oldest_first", limit: 100)])
+        #expect(answer.filters[0].label == "favorites · oldest first")
+        #expect(AppliedFilters(dateFrom: "2026-01-01").label == "since 2026-01-01")
     }
 }
 
