@@ -6,8 +6,13 @@
 	objectVersion = 110;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		92A1B0012F00000100AAF4BB /* AlbumAI in Frameworks */ = {isa = PBXBuildFile; productRef = 92A1B0022F00000100AAF4BB /* AlbumAI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		929276E2306ED43100AAF4BB /* DejaViewPix.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DejaViewPix.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		92A1B0042F00000100AAF4BB /* AlbumAI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = AlbumAI; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -35,6 +40,7 @@
 		929276DF306ED43100AAF4BB /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				92A1B0012F00000100AAF4BB /* AlbumAI in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -43,6 +49,7 @@
 		929276D9306ED43100AAF4BB = {
 			isa = PBXGroup;
 			children = (
+				92A1B0042F00000100AAF4BB /* AlbumAI */,
 				929276E4306ED43100AAF4BB /* DejaViewPix */,
 				929276E3306ED43100AAF4BB /* Products */,
 			);
@@ -73,6 +80,9 @@
 				929276E4306ED43100AAF4BB /* DejaViewPix */,
 			);
 			name = DejaViewPix;
+			packageProductDependencies = (
+				92A1B0022F00000100AAF4BB /* AlbumAI */,
+			);
 			productName = DejaViewPix;
 			productReference = 929276E2306ED43100AAF4BB /* DejaViewPix.app */;
 			productType = "com.apple.product-type.application";
@@ -101,6 +111,9 @@
 			);
 			mainGroup = 929276D9306ED43100AAF4BB;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				92A1B0032F00000100AAF4BB /* XCLocalSwiftPackageReference "AlbumAI" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 929276E3306ED43100AAF4BB /* Products */;
 			projectDirPath = "";
@@ -262,6 +275,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = DejaViewPix/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Deja View Pix";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -298,6 +312,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = DejaViewPix/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Deja View Pix";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -341,6 +356,21 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		92A1B0032F00000100AAF4BB /* XCLocalSwiftPackageReference "AlbumAI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = AlbumAI;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		92A1B0022F00000100AAF4BB /* AlbumAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 92A1B0032F00000100AAF4BB /* XCLocalSwiftPackageReference "AlbumAI" */;
+			productName = AlbumAI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 929276DA306ED43100AAF4BB /* Project object */;
 	validationLevel = 1;

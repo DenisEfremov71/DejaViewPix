@@ -58,12 +58,12 @@ struct APIErrorResponse: Decodable {
     }
 }
 
-enum ClaudeError: LocalizedError {
+public enum ClaudeError: LocalizedError {
     case http(status: Int, type: String?, message: String?)
     case invalidResponse
     case noTextContent
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .http(let status, let type, let message):
             if let message {
@@ -82,23 +82,38 @@ enum ClaudeError: LocalizedError {
     }
 }
 
-enum ClaudeModel: String {
+public enum ClaudeModel: String, Sendable {
     case haiku = "claude-haiku-4-5-20251001"
     case sonnet = "claude-sonnet-5-5"
     case opus = "claude-opus-5-5"
     case nonexisting = "claude-nope"
 }
 
-struct ClaudeClient {
-    var model: ClaudeModel = .haiku
-    var maxTokens = 1024
-    var session: URLSession = .shared
+public struct ClaudeClient: Sendable {
+    public var model: ClaudeModel
+    public var maxTokens: Int
+    public var session: URLSession
+
+    /// Returns the API key. Called on every request, so the key is never stored in the client.
+    private let apiKey: @Sendable () throws -> String
 
     private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let apiVersion = "2023-06-01"
 
+    public init(
+        model: ClaudeModel = .haiku,
+        maxTokens: Int = 1024,
+        session: URLSession = .shared,
+        apiKey: @escaping @Sendable () throws -> String
+    ) {
+        self.model = model
+        self.maxTokens = maxTokens
+        self.session = session
+        self.apiKey = apiKey
+    }
+
     private func makeRequest(prompt: String) throws -> URLRequest {
-        let apiKey = try APIConfig.claudeAPIKey()
+        let apiKey = try apiKey()
 
         let body = MessageRequest(
             model: model.rawValue,
@@ -120,7 +135,7 @@ struct ClaudeClient {
         return request
     }
 
-    func send(_ prompt: String) async throws -> String {
+    public func send(_ prompt: String) async throws -> String {
         let request = try makeRequest(prompt: prompt)
         let (data, response) = try await session.data(for: request)
 

@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum ConfigError: LocalizedError {
+nonisolated enum ConfigError: LocalizedError {
     case missingAPIKey
     case placeholderAPIKey
     
@@ -21,7 +21,7 @@ enum ConfigError: LocalizedError {
     }
 }
 
-enum APIConfig {
+nonisolated enum APIConfig {
     private static let infoKey = "ClaudeAPIKey"
     private static let placeholder = "your-key-here"
     

@@ -5,6 +5,7 @@
 //  Created by Denis Efremov on 2026-10-01.
 //
 
+import AlbumAI
 import SwiftUI
 
 struct ContentView: View {
@@ -13,7 +14,7 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var isLoading = false
 
-    private let client = ClaudeClient()
+    private let client = ClaudeClient(apiKey: { try APIConfig.claudeAPIKey() })
 
     private var canSend: Bool {
         !isLoading
