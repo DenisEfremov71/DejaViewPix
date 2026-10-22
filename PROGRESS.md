@@ -2,9 +2,9 @@
 
 ## Current status
 
-**Day 9 🟡 hardening built and checked in the simulator (2026-10-02).** Still to do on the iPhone: Instruments (time to first result, memory while scrolling) and the 2-minute demo video. Then **Day 10.**
+**Day 9 🟡 hardening built, checked in the simulator and profiled on the iPhone (2026-10-22).** Still to do: the 2-minute demo video. Then **Day 10.**
 
-**Where we stopped (2026-10-22):** the Day 9 code is written, tested (118 tests; Debug and Release build), checked in the simulator, committed and pushed. Still to do: the user runs Instruments and records the demo on their iPhone (steps and shot list in the Day 9 section below). When resuming: ask for the Instruments numbers, record them under Day 9, then start Day 10.
+**Where we stopped (2026-10-22):** the Day 9 hardening is committed and pushed (`d5ebc06`). Instruments on the iPhone found that Claude spent most of each search copying long PhotoKit IDs, so `search_photos` now gives it short aliases (`p1`, `p2`, …): searches went from ~15 s to ~6 s. The alias fix and these notes are committed and pushed. Still to do: the user records the demo video (shot list in the Day 9 section below). When resuming: ask about the video, then start Day 10.
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -339,7 +339,8 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
     - The key is in the Keychain, this device only, and goes only to api.anthropic.com.
     - Editing filters sends nothing.
   - "Thumbnail" signposts, from request to final image.
-- 118 tests (+11): retry notices through the task-local (529 then 429 with `retry-after`), no observer, status lines and causes, every `SearchFailure` mapping, timeout (slow, fast, error passes through, cancellation).
+- Photo aliases (found with Instruments, 2026-10-22): `PhotoAliases` gives each photo a short alias (`p1`, `p2`, …) the first time a search returns it, one table per search. `search_photos` sends Claude only aliases, `present_results` takes aliases, and `SearchAnswer.validated` maps them back to real IDs (unknown aliases and real IDs are rejected). `ToolOutput.photoIDs` and `SearchAnswer.photoIDs` still hold real IDs, so the app and the eval scoring are unchanged.
+- 121 tests (+11 hardening, +3 aliases): retry notices through the task-local (529 then 429 with `retry-after`), no observer, status lines and causes, every `SearchFailure` mapping, timeout (slow, fast, error passes through, cancellation).
 
 **Verified (iPhone 17 simulator, debug menu):**
 
@@ -355,8 +356,30 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
 
 No path crashed or left a spinner running. Debug and Release both build without warnings.
 
+**Instruments (iPhone 13 Pro Max, iOS 26.6.2, Release, 2026-10-22)**
+
+The first Time Profiler run showed 14–21 s per search with the CPU almost idle. The per-search log line pointed at the cause: about 1,170 output tokens for a 2-round search, most of it Claude copying 30 PhotoKit IDs (`6F9B2C1E-…/L0/001`, ~30 tokens each) into `present_results`. The Day 8 evals missed it because the canned library has short IDs. After the alias fix:
+
+| Query (log line) | Before | After |
+|---|---|---|
+| Photos from last year (2 rounds) | 14.98 s · 5,695 in / 1,172 out · $0.0116 | 10.04 s · 4,878 in / 354 out · $0.0066 |
+| Videos from last summer → last year (2 rounds) | 14.76 s · 5,793 in / 1,176 out · $0.0117 | 5.95 s · 4,981 in / 306 out · $0.0065 |
+| Photos from Whistler from last year (3 rounds) | 17.66 s · 8,256 in / 1,303 out · $0.0148 | 8.83 s · 7,453 in / 466 out · $0.0098 |
+
+(The second query differed between the runs, so compare it loosely.)
+
+| Measure | Result |
+|---|---|
+| Time to first result ("Search" signpost) | before 14.2 / 14.6 / 20.8 s; after **6.2 / 5.6 / 12.7 s** (the 3-round Whistler query: 8.8 s in another run) |
+| Thumbnail, request to final image (105) | avg 70 ms, max 750 ms |
+| Local edit (remove a chip) | 30 ms, no model call |
+| Hangs (threshold 250 ms) | none: searches, grid fill, chip edit, scrolling |
+| Thermal state | Nominal throughout |
+| Allocations | Gen A (launch, search, grid fill) +32.8 MiB; Gen B (~40 s of hard scrolling) **+1.3 MiB**. A spike while the grid fills, then it steps down and stays flat: no leak |
+
+Tips: start with Product › Profile (⌘I) so Instruments gets a fresh Release build (its own Record button relaunches whatever is installed). Allocations needs Recording Mode "Immediate" to show Mark Generation while recording. Per-search log lines: Console.app, the iPhone, `process:DejaViewPix search`.
+
 **Still to do (on the iPhone)**
-- Instruments (Product › Profile on the iPhone): Time Profiler + Points of Interest. Search for something broad ("photos from last year"); the "Search" interval is time to first result, and "Thumbnail" is per-image latency. Then Allocations while scrolling the grid hard for about 20 s: memory should level off.
 - The 2-minute demo video, in a Release build (no ladybug menu):
   1. 0:00 search screen; show the privacy note briefly
   2. 0:15 a natural query ("photos from last summer") with the status lines
@@ -368,6 +391,9 @@ No path crashed or left a spinner running. Debug and Release both build without 
 **Interview answer:** "What happens in your app when the provider is overloaded?" A 529 or `overloaded_error` is retryable, so the client retries up to 3 attempts with exponential backoff and jitter (1 s, then about 2 s), or waits as long as `retry-after` says. Each retry reaches the screen through a task-local observer: "Claude is busy. Retrying in 2 s (attempt 2 of 3)", not a silent spinner. If all three fail, the user sees "Claude Is Overloaded. Try again in a minute" with a Try Again button. The technical detail and request ID are under Details, and the failure is logged with its cost. Nothing waits forever, because the whole search has a 60-second limit, and Cancel stops a backoff immediately. Retries happen only before any output: for the streaming chat, a mid-stream error ends the stream instead of retrying, so text is never duplicated.
 
 ## Open items
+
+- Re-run the dev evals with photo aliases (about $0.35) to confirm Haiku still scores 98%. The canned IDs were already short, so latency and cost there shouldn't change.
+- Multi-round searches (a named place: geocode, search, answer) take 9–13 s on the iPhone; each round is a full model call.
 
 - Haiku once read "last winter" as December 2024–February 2025 (on 2026-10-02 the answer is December 2025–February 2026); another run of the same query got it right. Covered by eval cases `rel-02`, `rel-03` and `typo-01`; one possible Day 8 fix is computing the season's dates in the system prompt.
 - Switching tabs mid-search cancels the search (`.task` ends when the view disappears) and runs it again when the user returns. That's acceptable, but it could keep running instead.

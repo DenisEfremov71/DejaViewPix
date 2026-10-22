@@ -9,15 +9,52 @@ import Foundation
 public protocol ToolExecuting: Sendable {
     var definitions: [ToolDefinition] { get }
     /// Runs one tool call. Any error thrown (except cancellation) goes back to Claude as a
-    /// `tool_result` with `is_error: true`.
-    func execute(name: String, input: JSONValue) async throws -> ToolOutput
+    /// `tool_result` with `is_error: true`. Photo IDs in `content` are replaced by aliases from
+    /// `aliases`, the table for the current search.
+    func execute(name: String, input: JSONValue, aliases: inout PhotoAliases) async throws -> ToolOutput
+}
+
+extension ToolExecuting {
+    /// Runs one tool call with a fresh alias table.
+    public func execute(name: String, input: JSONValue) async throws -> ToolOutput {
+        var aliases = PhotoAliases()
+        return try await execute(name: name, input: input, aliases: &aliases)
+    }
+}
+
+/// Short stand-ins for photo IDs ("p1", "p2", …), one table per search. Claude sees only the
+/// aliases. A PhotoKit identifier such as "6F9B2C1E-3A4D-4B8E-9C2F-1A2B3C4D5E6F/L0/001" costs
+/// about 30 output tokens every time Claude copies it into present_results; an alias costs two.
+public struct PhotoAliases: Sendable, Equatable {
+    private var aliasByID: [String: String] = [:]
+    private var idByAlias: [String: String] = [:]
+
+    public init() {}
+
+    /// The alias for a photo ID, made on first use. The same photo keeps its alias across
+    /// searches.
+    public mutating func alias(for id: String) -> String {
+        if let alias = aliasByID[id] {
+            return alias
+        }
+        let alias = "p\(aliasByID.count + 1)"
+        aliasByID[id] = alias
+        idByAlias[alias] = id
+        return alias
+    }
+
+    /// The photo ID behind an alias, or nil if no search returned it.
+    public func id(for alias: String) -> String? {
+        idByAlias[alias]
+    }
 }
 
 public struct ToolOutput: Sendable, Equatable {
     /// The text sent back to Claude: compact JSON, or an error message.
     public var content: String
     public var isError: Bool
-    /// Photo IDs this call returned, so the app can show them without parsing `content`.
+    /// Photo IDs this call returned (the real ones, not the aliases in `content`), so the app
+    /// can show them without parsing `content`.
     public var photoIDs: [String]
 
     public init(content: String, isError: Bool = false, photoIDs: [String] = []) {
@@ -62,9 +99,9 @@ public struct PhotoTools: ToolExecuting {
         self.timeZone = timeZone
     }
 
-    public func execute(name: String, input: JSONValue) async throws -> ToolOutput {
+    public func execute(name: String, input: JSONValue, aliases: inout PhotoAliases) async throws -> ToolOutput {
         switch name {
-        case "search_photos": try await searchPhotos(Self.decode(input))
+        case "search_photos": try await searchPhotos(Self.decode(input), aliases: &aliases)
         case "geocode_place": try await geocodePlace(Self.decode(input))
         case "list_albums": try await listAlbums()
         default: throw ToolError.unknownTool(name)
@@ -141,7 +178,7 @@ public struct PhotoTools: ToolExecuting {
         return query
     }
 
-    private func searchPhotos(_ input: SearchPhotosInput) async throws -> ToolOutput {
+    private func searchPhotos(_ input: SearchPhotosInput, aliases: inout PhotoAliases) async throws -> ToolOutput {
         let result = try await library.search(query(from: input))
 
         let dateFormat = Date.VerbatimFormatStyle(
@@ -150,7 +187,7 @@ public struct PhotoTools: ToolExecuting {
             calendar: calendar
         )
         let photos: [JSONValue] = result.matches.map { match in
-            var photo: [String: JSONValue] = ["id": .string(match.id)]
+            var photo: [String: JSONValue] = ["id": .string(aliases.alias(for: match.id))]
             if let date = match.creationDate {
                 photo["date"] = .string(date.formatted(dateFormat))
             }

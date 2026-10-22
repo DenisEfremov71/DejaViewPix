@@ -185,6 +185,7 @@ public struct ToolLoop: Sendable {
         var messages: [Message] = [.user(query)]
         var rounds: [ToolLoopRound] = []
         var calls: [ToolCallRecord] = []
+        var aliases = PhotoAliases()
         var correctionUsed = false
         let definitions = tools.definitions + [SearchAnswer.toolDefinition]
         let clock = ContinuousClock()
@@ -246,7 +247,7 @@ public struct ToolLoop: Sendable {
                         continue
                     }
                     do {
-                        let answer = try SearchAnswer.validated(input: call.input, calls: calls)
+                        let answer = try SearchAnswer.validated(input: call.input, calls: calls, aliases: aliases)
                         round.toolCalls.append(ToolCallRecord(
                             id: call.id, name: call.name, input: call.input,
                             output: ToolOutput(content: "OK", photoIDs: answer.photoIDs)
@@ -269,7 +270,7 @@ public struct ToolLoop: Sendable {
                         output = ToolOutput(content: message, isError: true)
                     }
                 } else {
-                    output = try await execute(name: call.name, input: call.input)
+                    output = try await execute(name: call.name, input: call.input, aliases: &aliases)
                 }
 
                 let record = ToolCallRecord(id: call.id, name: call.name, input: call.input, output: output)
@@ -288,9 +289,9 @@ public struct ToolLoop: Sendable {
 
     /// Runs one tool. A failure becomes an error result for Claude instead of ending the loop;
     /// only cancellation propagates.
-    private func execute(name: String, input: JSONValue) async throws -> ToolOutput {
+    private func execute(name: String, input: JSONValue, aliases: inout PhotoAliases) async throws -> ToolOutput {
         do {
-            return try await tools.execute(name: name, input: input)
+            return try await tools.execute(name: name, input: input, aliases: &aliases)
         } catch {
             try Task.checkCancellation()
             if error is CancellationError { throw error }

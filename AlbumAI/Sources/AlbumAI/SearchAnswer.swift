@@ -125,9 +125,10 @@ extension SearchAnswer {
         var photo_ids: [String]
     }
 
-    /// Decodes and checks a `present_results` call against the tool calls that ran before it.
-    /// Throws `ToolError.invalidInput` with a message the model can act on.
-    static func validated(input: JSONValue, calls: [ToolCallRecord]) throws -> SearchAnswer {
+    /// Decodes and checks a `present_results` call against the tool calls that ran before it,
+    /// and turns its aliases back into photo IDs. Throws `ToolError.invalidInput` with a
+    /// message the model can act on.
+    static func validated(input: JSONValue, calls: [ToolCallRecord], aliases: PhotoAliases) throws -> SearchAnswer {
         let decoded: PresentResultsInput
         do {
             decoded = try input.decode()
@@ -141,12 +142,12 @@ extension SearchAnswer {
         }
 
         var seen = Set<String>()
-        let photoIDs = decoded.photo_ids.filter { seen.insert($0).inserted }
+        let given = decoded.photo_ids.filter { seen.insert($0).inserted }
 
         // The model must not invent IDs: each one has to come from a search that succeeded.
         let searches = calls.filter { $0.name == "search_photos" && !$0.output.isError }
         let returned = Set(searches.flatMap(\.output.photoIDs))
-        let unknown = photoIDs.filter { !returned.contains($0) }
+        let unknown = given.filter { aliases.id(for: $0).map(returned.contains) != true }
         guard unknown.isEmpty else {
             let list = unknown.prefix(5).map { "\"\($0)\"" }.joined(separator: ", ")
             let more = unknown.count > 5 ? " and \(unknown.count - 5) more" : ""
@@ -155,6 +156,8 @@ extension SearchAnswer {
                     + "Use only IDs copied from search_photos results."
             )
         }
+
+        let photoIDs = given.compactMap(aliases.id(for:))
 
         // Filters of the searches that contributed photos; with no photos, every search counts.
         let contributing = photoIDs.isEmpty

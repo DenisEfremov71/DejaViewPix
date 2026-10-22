@@ -119,7 +119,7 @@ struct ToolLoopTests {
         let client = ScriptedClient([
             reply(.text("Let me find Whistler first."), geocodeCall),
             reply(searchCall),
-            reply(present("2 photos from Whistler last winter.", ["B/L0/001", "A/L0/001"])),
+            reply(present("2 photos from Whistler last winter.", ["p2", "p1"])),
         ])
         let library = FakeLibrary(result: PhotoSearchResult(matches: [
             PhotoMatch(id: "A/L0/001", creationDate: date("2026-01-14T18:30:00Z"), distanceMeters: 1_234),
@@ -162,12 +162,13 @@ struct ToolLoopTests {
             content: #"{"kind":"city","latitude":50.1163,"longitude":-122.9574,"name":"Whistler, BC, Canada","radius_meters":15000}"#
         )]))
 
-        // Third request carries the search results, with dates in the user's time zone.
+        // Third request carries the search results, with aliases for the photo IDs and dates in
+        // the user's time zone.
         let third = requests[2].messages
         #expect(third.count == 5)
         #expect(third[4] == Message(role: .user, content: [.toolResult(
             toolUseID: "toolu_2",
-            content: #"{"more_available":false,"photos":[{"date":"2026-01-14 10:30","id":"A/L0/001","km":1.2},{"date":"2025-12-20 12:05","favorite":true,"id":"B/L0/001","km":4.5}],"returned":2}"#
+            content: #"{"more_available":false,"photos":[{"date":"2026-01-14 10:30","id":"p1","km":1.2},{"date":"2025-12-20 12:05","favorite":true,"id":"p2","km":4.5}],"returned":2}"#
         )]))
 
         // Whole days in Vancouver time; date_to is inclusive.
@@ -302,8 +303,8 @@ struct FinalAnswerTests {
     @Test func inventedIDGetsOneCorrection() async throws {
         let (result, client) = try await run(
             reply(search),
-            reply(present("Found 2.", ["A/L0/001", "Z/L0/999"], id: "toolu_2")),
-            reply(present("Found 1.", ["A/L0/001"], id: "toolu_3"))
+            reply(present("Found 2.", ["p1", "p9"], id: "toolu_2")),
+            reply(present("Found 1.", ["p1"], id: "toolu_3"))
         )
 
         #expect(result.answer.photoIDs == ["A/L0/001"])
@@ -312,36 +313,36 @@ struct FinalAnswerTests {
             Issue.record("Expected an error tool_result for toolu_2, got \(correction)")
             return
         }
-        #expect(content.contains("\"Z/L0/999\""))
+        #expect(content.contains("\"p9\""))
     }
 
     @Test func secondInvalidAnswerFails() async throws {
         await #expect(throws: ToolLoopError.self) {
             try await run(
                 reply(search),
-                reply(present("Found.", ["Z/L0/999"], id: "toolu_2")),
-                reply(present("Found.", ["Z/L0/998"], id: "toolu_3"))
+                reply(present("Found.", ["p9"], id: "toolu_2")),
+                reply(present("Found.", ["p8"], id: "toolu_3"))
             )
         }
     }
 
     @Test func idsFromAFailedSearchAreRejected() async throws {
-        // An ID that only appears in the model's imagination, with no successful search at all.
+        // An alias that only appears in the model's imagination, with no successful search at all.
         await #expect(throws: ToolLoopError.invalidAnswer(
             ToolError.invalidInput(
-                #"These photo_ids were not returned by any search_photos call: "A/L0/001". Use only IDs copied from search_photos results."#
+                #"These photo_ids were not returned by any search_photos call: "p1". Use only IDs copied from search_photos results."#
             ).localizedDescription
         )) {
             try await run(
-                reply(present("Found.", ["A/L0/001"], id: "toolu_2")),
-                reply(present("Found.", ["A/L0/001"], id: "toolu_3"))
+                reply(present("Found.", ["p1"], id: "toolu_2")),
+                reply(present("Found.", ["p1"], id: "toolu_3"))
             )
         }
     }
 
     @Test func emptySummaryIsRejected() throws {
         #expect(throws: ToolError.self) {
-            try SearchAnswer.validated(input: ["summary": "  ", "photo_ids": []], calls: [])
+            try SearchAnswer.validated(input: ["summary": "  ", "photo_ids": []], calls: [], aliases: PhotoAliases())
         }
     }
 
@@ -349,7 +350,7 @@ struct FinalAnswerTests {
         let (result, client) = try await run(
             reply(search),
             reply(.text("I found 2 photos."), stop: "end_turn"),
-            reply(present("Found 2.", ["A/L0/001", "B/L0/001"]))
+            reply(present("Found 2.", ["p1", "p2"]))
         )
 
         #expect(result.answer.photoIDs == ["A/L0/001", "B/L0/001"])
@@ -367,10 +368,47 @@ struct FinalAnswerTests {
         }
     }
 
+    @Test func aliasesAreStableAcrossSearchesAndMapBackToIDs() async throws {
+        let (result, client) = try await run(
+            reply(search),
+            reply(.toolUse(id: "toolu_2", name: "search_photos", input: ["date_from": "2026-02-01"])),
+            reply(present("Found 2.", ["p2", "p1"], id: "toolu_3"))
+        )
+
+        #expect(result.answer.photoIDs == ["B/L0/001", "A/L0/001"])
+        // Claude never sees a real ID, and the same photo gets the same alias both times.
+        let results = await client.requests.last!.messages.compactMap { message in
+            message.content.compactMap { block -> String? in
+                if case .toolResult(_, let content, _) = block { content } else { nil }
+            }.first
+        }
+        #expect(results.count == 2)
+        #expect(results.allSatisfy { $0.contains(#""id":"p1""#) && $0.contains(#""id":"p2""#) && !$0.contains("L0/001") })
+    }
+
+    @Test func realIDsAreNotAccepted() async throws {
+        await #expect(throws: ToolLoopError.self) {
+            try await run(
+                reply(search),
+                reply(present("Found.", ["A/L0/001"], id: "toolu_2")),
+                reply(present("Found.", ["A/L0/001"], id: "toolu_3"))
+            )
+        }
+    }
+
+    @Test func aliasTable() {
+        var aliases = PhotoAliases()
+        #expect(aliases.alias(for: "X/L0/001") == "p1")
+        #expect(aliases.alias(for: "Y/L0/001") == "p2")
+        #expect(aliases.alias(for: "X/L0/001") == "p1")
+        #expect(aliases.id(for: "p2") == "Y/L0/001")
+        #expect(aliases.id(for: "p3") == nil)
+    }
+
     @Test func presentResultsAlongsideOtherToolsIsAnError() async throws {
         let (result, _) = try await run(
-            reply(search, present("Early.", ["A/L0/001"], id: "toolu_2")),
-            reply(present("Found.", ["A/L0/001"], id: "toolu_3"))
+            reply(search, present("Early.", ["p1"], id: "toolu_2")),
+            reply(present("Found.", ["p1"], id: "toolu_3"))
         )
 
         let first = try #require(result.rounds.first?.toolCalls)
@@ -394,7 +432,11 @@ struct FinalAnswerTests {
             ),
         ]
 
-        let answer = try SearchAnswer.validated(input: ["summary": "Two.", "photo_ids": ["B", "B"]], calls: calls)
+        var aliases = PhotoAliases()
+        _ = aliases.alias(for: "A")
+        let b = aliases.alias(for: "B")
+
+        let answer = try SearchAnswer.validated(input: ["summary": "Two.", "photo_ids": [.string(b), .string(b)]], calls: calls, aliases: aliases)
 
         #expect(answer.photoIDs == ["B"])
         #expect(answer.filters == [AppliedFilters(favoritesOnly: true, sort: "oldest_first", limit: 100)])
