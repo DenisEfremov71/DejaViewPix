@@ -11,6 +11,7 @@ struct APIKeyView: View {
     @State private var apiKeyInput = ""
     @State private var hasSavedKey = false
     @State private var keyStatus: String?
+    @State private var showsPrivacy = false
     @FocusState private var isKeyFocused: Bool
 
     private var trimmedKeyInput: String {
@@ -44,9 +45,16 @@ struct APIKeyView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Button("What Deja View Pix sends, and what it doesn't", systemImage: "hand.raised") {
+                showsPrivacy = true
+            }
+            .font(.footnote)
+            .padding(.top, 8)
+
             Spacer(minLength: 0)
         }
         .padding()
+        .sheet(isPresented: $showsPrivacy) { PrivacyNoteView() }
         .dismissesKeyboardOnTap($isKeyFocused)
         .onAppear(perform: refreshKeyStatus)
     }

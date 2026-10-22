@@ -88,6 +88,9 @@ private struct PhotoCell: View {
             // land in the wrong cell.
             .task(id: ThumbnailRequest(id: photo.id, targetSize: targetSize)) {
                 guard targetSize.width > 0 else { return }
+                // From request to final image, for Instruments' Points of Interest.
+                let signpost = ThumbnailLoader.signposter.beginInterval("Thumbnail", id: ThumbnailLoader.signposter.makeSignpostID())
+                defer { ThumbnailLoader.signposter.endInterval("Thumbnail", signpost) }
                 for await image in await loader.thumbnails(for: photo.id, targetSize: targetSize) {
                     self.image = image
                     imageID = photo.id
@@ -142,6 +145,8 @@ private struct PhotoCell: View {
 /// Thumbnails through one `PHCachingImageManager`. It isn't tied to the main actor: asset
 /// fetches run on the concurrent pool, and PhotoKit calls back on threads of its choosing.
 nonisolated final class ThumbnailLoader: @unchecked Sendable {
+    static let signposter = OSSignposter(subsystem: "DejaViewPix", category: .pointsOfInterest)
+
     private let manager = PHCachingImageManager()
     private let assets = OSAllocatedUnfairLock<[String: PHAsset]>(initialState: [:])
 

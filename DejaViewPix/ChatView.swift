@@ -31,7 +31,7 @@ struct ChatView: View {
 
     #if DEBUG
     private let client = ClaudeClient(
-        session: SimulatedOverload.session,
+        session: SimulatedFailure.session,
         apiKey: { try APIKeyStore.claude.load() }
     )
     #else
@@ -115,7 +115,7 @@ struct ChatView: View {
 
         retryMessage = nil
         #if DEBUG
-        SimulatedOverload.arm(count: simulateOverload ? 2 : 0)
+        SimulatedFailure.arm(simulateOverload ? .overloadedTwice : nil)
         #endif
 
         sendTask = Task {

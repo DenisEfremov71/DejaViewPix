@@ -121,13 +121,25 @@ public actor ClaudeClient: MessageSending {
                 else { throw error }
 
                 attempt += 1
-                try await sleep(retryPolicy.delay(
+                let delay = retryPolicy.delay(
                     beforeAttempt: attempt,
                     retryAfter: (error as? ClaudeError)?.retryAfter
+                )
+                await Self.retryObserver?(RetryNotice(
+                    attempt: attempt,
+                    maxAttempts: retryPolicy.maxAttempts,
+                    delay: delay,
+                    cause: RetryNotice.Cause(error)
                 ))
+                try await sleep(delay)
             }
         }
     }
+
+    /// Told about each retry `createMessage` is about to make, so a screen can say
+    /// "Claude is busy, retrying in 2 s" instead of spinning silently. Task-local: set it
+    /// around one search with `ClaudeClient.$retryObserver.withValue(…)`.
+    @TaskLocal public static var retryObserver: (@Sendable (RetryNotice) async -> Void)?
 
     private nonisolated func createMessageOnce(_ body: MessageRequest) async throws -> MessageResponse {
         let request = try Self.makeURLRequest(body: body, apiKey: apiKey(), endpoint: endpoint)

@@ -10,8 +10,12 @@ import SwiftUI
 /// Natural-language search. Every phase has its own screen, and so does each photo access
 /// state.
 struct PhotoSearchView: View {
+    /// Switches to the API Key tab, for failures caused by the key.
+    var showAPIKey: () -> Void = {}
+
     @Environment(\.scenePhase) private var scenePhase
     @State private var access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    @State private var showsPrivacy = false
 
     var body: some View {
         NavigationStack {
@@ -24,11 +28,17 @@ struct PhotoSearchView: View {
                 case .denied, .restricted:
                     PhotoAccessBlockedView(status: access)
                 default:
-                    SearchScreen(isLimited: access == .limited)
+                    SearchScreen(isLimited: access == .limited, showAPIKey: showAPIKey)
                 }
             }
             .navigationTitle("Deja View Pix")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Privacy", systemImage: "hand.raised") { showsPrivacy = true }
+                }
+            }
+            .sheet(isPresented: $showsPrivacy) { PrivacyNoteView() }
         }
         .onChange(of: scenePhase) { _, phase in
             // The user may have changed access in Settings.
@@ -41,11 +51,16 @@ struct PhotoSearchView: View {
 
 private struct SearchScreen: View {
     let isLimited: Bool
+    let showAPIKey: () -> Void
 
     @State private var model = SearchModel()
     @State private var query = ""
     @State private var submission: Submission?
     @FocusState private var isQueryFocused: Bool
+    #if DEBUG
+    /// The failure the next search simulates; cleared once it's used.
+    @State private var simulatedFailure: SimulatedFailure.Mode?
+    #endif
 
     private struct Submission: Equatable {
         let id = UUID()
@@ -88,14 +103,19 @@ private struct SearchScreen: View {
                     // Animate moving between screens, not edits within one: a removed chip
                     // should update the grid at once.
                     .animation(.default, value: phaseKind)
-                if !isSearching, !model.rounds.isEmpty {
-                    SearchDetailsView(rounds: model.rounds, metrics: model.metrics)
+                if !isSearching, !model.rounds.isEmpty || model.phase.failure != nil {
+                    SearchDetailsView(rounds: model.rounds, metrics: model.metrics, failure: model.phase.failure)
                 }
             }
             .padding()
         }
         .scrollDismissesKeyboard(.interactively)
         .dismissesKeyboardOnTap($isQueryFocused)
+        #if DEBUG
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { simulationMenu }
+        }
+        #endif
         // A new submission cancels the previous search; clearing it is Cancel.
         .task(id: submission) {
             guard let submission else { return }
@@ -134,8 +154,33 @@ private struct SearchScreen: View {
     private func submit() {
         isQueryFocused = false
         guard !trimmedQuery.isEmpty else { return }
-        submission = Submission(text: trimmedQuery)
+        start(trimmedQuery)
     }
+
+    private func start(_ text: String) {
+        #if DEBUG
+        SimulatedFailure.arm(simulatedFailure)
+        simulatedFailure = nil
+        #endif
+        submission = Submission(text: text)
+    }
+
+    #if DEBUG
+    /// Debug builds only: makes the next search fail in a chosen way, to check every
+    /// failure path without breaking the network or the key.
+    private var simulationMenu: some View {
+        Menu {
+            Picker("Next search", selection: $simulatedFailure) {
+                Text("No simulation").tag(SimulatedFailure.Mode?.none)
+                ForEach(SimulatedFailure.Mode.allCases) { mode in
+                    Text(mode.title).tag(Optional(mode))
+                }
+            }
+        } label: {
+            Label("Simulate failure", systemImage: simulatedFailure == nil ? "ladybug" : "ladybug.fill")
+        }
+    }
+    #endif
 
     // MARK: - Phases
 
@@ -177,17 +222,38 @@ private struct SearchScreen: View {
                 )
             }
 
-        case .failed(let message):
-            ContentUnavailableView {
-                Label("Search Didn't Finish", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(message)
-            } actions: {
+        case .failed(let failure):
+            failureView(failure)
+        }
+    }
+
+    private func failureView(_ failure: SearchFailure) -> some View {
+        ContentUnavailableView {
+            Label(failure.title, systemImage: Self.icon(for: failure))
+        } description: {
+            Text(failure.message)
+        } actions: {
+            switch failure.action {
+            case .tryAgain:
                 if let submission {
-                    Button("Try Again") { self.submission = Submission(text: submission.text) }
+                    Button("Try Again") { start(submission.text) }
                         .buttonStyle(.borderedProminent)
                 }
+            case .checkAPIKey:
+                Button("Open API Key", action: showAPIKey)
+                    .buttonStyle(.borderedProminent)
+            case .rephrase:
+                Button("Edit Search") { isQueryFocused = true }
+                    .buttonStyle(.borderedProminent)
             }
+        }
+    }
+
+    private static func icon(for failure: SearchFailure) -> String {
+        switch failure.action {
+        case .checkAPIKey: "key.slash"
+        case .rephrase: "text.magnifyingglass"
+        case .tryAgain: failure.title == "You're Offline" ? "wifi.slash" : "exclamationmark.triangle"
         }
     }
 
@@ -248,10 +314,17 @@ private struct SearchScreen: View {
 private struct SearchDetailsView: View {
     let rounds: [ToolLoopRound]
     let metrics: QueryMetrics?
+    let failure: SearchFailure?
 
     var body: some View {
         DisclosureGroup("Details") {
             VStack(alignment: .leading, spacing: 8) {
+                if let failure {
+                    Text(failure.detail)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
                 if let metrics {
                     Text(Self.metricsLabel(metrics))
                         .font(.footnote)

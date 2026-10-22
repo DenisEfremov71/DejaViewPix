@@ -17,13 +17,17 @@ final class SearchModel {
         case searching(status: String)
         case results(Outcome)
         case empty(Outcome)
-        case failed(String)
+        case failed(SearchFailure)
 
         var outcome: Outcome? {
             switch self {
             case .results(let outcome), .empty(let outcome): outcome
             default: nil
             }
+        }
+
+        var failure: SearchFailure? {
+            if case .failed(let failure) = self { failure } else { nil }
         }
     }
 
@@ -60,12 +64,21 @@ final class SearchModel {
     private var editTask: Task<Void, Never>?
 
     private static let log = Logger(subsystem: "DejaViewPix", category: "search")
+    /// Intervals for Instruments' Points of Interest: a search from submit to results, and
+    /// local filter edits.
+    private static let signposter = OSSignposter(subsystem: "DejaViewPix", category: .pointsOfInterest)
 
     init(model: ClaudeModel = .haiku) {
         self.model = model
         tools = PhotoTools(library: library, geocoder: PlaceGeocoder(), timeZone: .current)
+        #if DEBUG
+        // Lets the debug menu simulate offline, 401, 429, 529 and the round cap.
+        let session = SimulatedFailure.session
+        #else
+        let session = URLSession.shared
+        #endif
         loop = ToolLoop(
-            client: ClaudeClient(model: model, apiKey: { try APIKeyStore.claude.load() }),
+            client: ClaudeClient(model: model, session: session, apiKey: { try APIKeyStore.claude.load() }),
             tools: tools
         )
     }
@@ -85,40 +98,60 @@ final class SearchModel {
         phase = .searching(status: "Reading your request…")
 
         let system = SearchPrompt.system(now: .now, timeZone: .current)
+        let loop = loop
         let clock = ContinuousClock()
         let start = clock.now
+        let signpost = Self.signposter.beginInterval("Search", id: Self.signposter.makeSignpostID())
         let outcome: String
         do {
-            let result = try await loop.run(
-                query,
-                system: system,
-                onRound: { @MainActor [weak self] round in
-                    guard let self, generation == self.generation else { return }
-                    rounds.append(round)
-                    Self.logTrace(round)
-                },
-                onToolStart: { @MainActor [weak self] start in
-                    guard let self, generation == self.generation else { return }
-                    phase = .searching(status: start.statusLine())
+            // Retries ("Claude is busy…") replace the status line; the next tool call
+            // replaces it again.
+            let result = try await ClaudeClient.$retryObserver.withValue({ @MainActor [weak self] notice in
+                guard let self, generation == self.generation else { return }
+                phase = .searching(status: notice.statusLine)
+                Self.log.notice("retry \(notice.statusLine, privacy: .public)")
+            }) {
+                // However the network behaves, the spinner stops within SearchTimeout.limit.
+                try await withSearchTimeout {
+                    try await loop.run(
+                        query,
+                        system: system,
+                        onRound: { @MainActor [weak self] round in
+                            guard let self, generation == self.generation else { return }
+                            rounds.append(round)
+                            Self.logTrace(round)
+                        },
+                        onToolStart: { @MainActor [weak self] start in
+                            guard let self, generation == self.generation else { return }
+                            phase = .searching(status: start.statusLine())
+                        }
+                    )
                 }
-            )
+            }
             let photos = await library.details(for: result.answer.photoIDs)
             try Task.checkCancellation()
-            guard generation == self.generation else { return }
+            guard generation == self.generation else {
+                Self.signposter.endInterval("Search", signpost, "superseded")
+                return
+            }
             show(Outcome(summary: result.answer.summary, filters: result.answer.filters, photos: photos, hasMore: false))
             finishedSubmission = submission
             outcome = "ok, \(photos.count) photos"
         } catch {
-            guard generation == self.generation else { return }
+            guard generation == self.generation else {
+                Self.signposter.endInterval("Search", signpost, "superseded")
+                return
+            }
             if error is CancellationError || Task.isCancelled {
                 phase = .idle
                 outcome = "cancelled"
             } else {
-                phase = .failed(error.localizedDescription)
+                phase = .failed(SearchFailure(error))
                 finishedSubmission = submission
                 outcome = "error: \(error.localizedDescription)"
             }
         }
+        Self.signposter.endInterval("Search", signpost, "\(outcome, privacy: .public)")
 
         // One usage line per query, failed ones included: they cost money too.
         let metrics = QueryMetrics(model: model.rawValue, rounds: rounds, latency: start.duration(to: clock.now))
@@ -139,6 +172,8 @@ final class SearchModel {
         isUpdating = true
 
         editTask = Task {
+            let signpost = Self.signposter.beginInterval("Local edit", id: Self.signposter.makeSignpostID())
+            defer { Self.signposter.endInterval("Local edit", signpost) }
             do {
                 let result = try await tools.search(filters)
                 let photos = await library.details(for: result.matches.map(\.id))
@@ -148,7 +183,7 @@ final class SearchModel {
                 Self.log.notice("filters edited · \(photos.count) photos · no model call")
             } catch {
                 guard generation == self.generation, !(error is CancellationError) else { return }
-                phase = .failed(error.localizedDescription)
+                phase = .failed(SearchFailure(error))
             }
             isUpdating = false
         }

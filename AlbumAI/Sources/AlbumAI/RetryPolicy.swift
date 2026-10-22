@@ -61,3 +61,48 @@ extension ClaudeError {
         if case .http(_, _, _, _, let retryAfter) = self { retryAfter } else { nil }
     }
 }
+
+/// A retry about to happen: which attempt comes next, after how long, and why.
+public struct RetryNotice: Sendable, Equatable {
+    public enum Cause: Sendable, Equatable {
+        case overloaded
+        case rateLimited
+        case serverError
+        case network
+
+        init(_ error: any Error) {
+            switch error {
+            case ClaudeError.http(429, _, _, _, _): self = .rateLimited
+            case ClaudeError.http(529, _, _, _, _): self = .overloaded
+            case ClaudeError.http(_, "overloaded_error", _, _, _): self = .overloaded
+            case is ClaudeError: self = .serverError
+            default: self = .network
+            }
+        }
+    }
+
+    /// The attempt about to be made: 2 for the first retry.
+    public var attempt: Int
+    public var maxAttempts: Int
+    public var delay: Duration
+    public var cause: Cause
+
+    public init(attempt: Int, maxAttempts: Int, delay: Duration, cause: Cause) {
+        self.attempt = attempt
+        self.maxAttempts = maxAttempts
+        self.delay = delay
+        self.cause = cause
+    }
+
+    /// "Claude is busy. Retrying in 2 s (attempt 2 of 3)…"
+    public var statusLine: String {
+        let seconds = max(1, Int((delay / .seconds(1)).rounded(.up)))
+        let reason = switch cause {
+        case .overloaded: "Claude is busy."
+        case .rateLimited: "Too many requests."
+        case .serverError: "Claude had a problem."
+        case .network: "The connection failed."
+        }
+        return "\(reason) Retrying in \(seconds) s (attempt \(attempt) of \(maxAttempts))…"
+    }
+}

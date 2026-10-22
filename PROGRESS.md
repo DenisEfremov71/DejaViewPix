@@ -2,7 +2,9 @@
 
 ## Current status
 
-**Day 8 ✅ done (2026-10-02).** Haiku 4.5 at 98% for $0.0066 per query; Sonnet 5.5 at 100% for $0.0156. Shipping Haiku. Next: **Day 9.**
+**Day 9 🟡 hardening built and checked in the simulator (2026-10-02).** Still to do on the iPhone: Instruments (time to first result, memory while scrolling) and the 2-minute demo video. Then **Day 10.**
+
+**Where we stopped (2026-10-22):** the Day 9 code is written, tested (118 tests; Debug and Release build), checked in the simulator, committed and pushed. Still to do: the user runs Instruments and records the demo on their iPhone (steps and shot list in the Day 9 section below). When resuming: ask for the Instruments numbers, record them under Day 9, then start Day 10.
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -315,6 +317,55 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
 - The eval runs for Day 8 cost about $2.30 in total.
 
 **Interview answer:** "How did you decide which model to ship?" With numbers from the same evals, on the same prompt. I first improved the prompt on the cheap model, one change at a time, from 76% to 98%. Then I ran both models: Haiku 98% at $0.0066 per query with a 4.8 s p95, Sonnet 100% at $0.0156 with an 8.6 s p95. The remaining gap is one run of one genuinely ambiguous query, and the held-back cases pass on both. So Sonnet would buy almost nothing users would notice, at 2.4× the cost and slower searches, which they would notice. I shipped Haiku and kept the eval suite, so if a larger dataset ever shows a real gap, switching is one enum case and a re-run.
+
+## Day 9: Hardening and the demo (in progress, 2026-10-02)
+
+**Built**
+- Package:
+  - `ClaudeClient.retryObserver`, a `@TaskLocal`: `createMessage` reports each retry before it waits, as a `RetryNotice` (attempt, max attempts, delay, cause: overloaded, rate limited, server error, network). `statusLine` reads e.g. "Claude is busy. Retrying in 2 s (attempt 2 of 3)…". Task-local, so the shared client and the `MessageSending` protocol stay unchanged.
+  - `SearchFailure(error)` maps every failure to a title, a message, an action (try again, check the API key, rephrase) and the technical detail: missing key, 401/403, 429, 529 or `overloaded_error`, other 5xx, offline, timed out, `SearchTimeout`, round cap, no or invalid answer, refusal, anything else.
+  - `withSearchTimeout` (60 s, `SearchTimeout.limit`) races the search against a sleep. Cancelling the caller cancels both.
+- App:
+  - `SearchModel`:
+    - runs the loop inside the retry observer and the timeout
+    - `Phase.failed` carries a `SearchFailure`
+    - signposts (`OSSignposter`, Points of Interest): "Search" from submit to results or failure, "Local edit"; retries are logged at `notice` level
+    - in debug builds the client uses `SimulatedFailure.session`
+  - The failure screen shows the title, the message and one action: Try Again, Open API Key (switches tab through the new `ContentView` tab selection), or Edit Search. The detail appears under "Details".
+  - `SimulatedFailure` (debug only) replaces `SimulatedOverload`. Modes: offline, bad key (401), rate limited once (429 with `retry-after: 3`), overloaded twice then OK, overloaded on every attempt (529), endless tool calls (round cap). A ladybug menu on the search screen arms it for the next search only. The Chat tab's toggle uses "overloaded twice".
+  - `PrivacyNoteView`, a sheet from the hand icon on the search screen and a link on the API Key tab:
+    - Sent: the query, date and time zone; per matching photo its ID, date, distance and video/favorite flags; album names and counts; place names and coordinates, looked up with Apple Maps.
+    - Never sent: images or their contents, photo coordinates, people.
+    - The key is in the Keychain, this device only, and goes only to api.anthropic.com.
+    - Editing filters sends nothing.
+  - "Thumbnail" signposts, from request to final image.
+- 118 tests (+11): retry notices through the task-local (529 then 429 with `retry-after`), no observer, status lines and causes, every `SearchFailure` mapping, timeout (slow, fast, error passes through, cancellation).
+
+**Verified (iPhone 17 simulator, debug menu):**
+
+| Path | Result |
+|---|---|
+| Offline | "The connection failed. Retrying…" ×2, then "You're Offline" + Try Again |
+| Bad key (401) | No retry, "API Key Not Accepted" + Open API Key |
+| Overloaded on every attempt (529) | "Claude is busy. Retrying…" ×2, then "Claude Is Overloaded" + Try Again |
+| Rate limited once (429) | "Too many requests. Retrying in 3 s", then the real search finished |
+| No results | Empty screen with chips and "Remove a filter to widen the search" |
+| Round cap | 5 rounds, then "Search Didn't Settle" + Edit Search |
+| Cancel mid-search, denied and limited access | Checked on Day 5 (limited on the iPhone) |
+
+No path crashed or left a spinner running. Debug and Release both build without warnings.
+
+**Still to do (on the iPhone)**
+- Instruments (Product › Profile on the iPhone): Time Profiler + Points of Interest. Search for something broad ("photos from last year"); the "Search" interval is time to first result, and "Thumbnail" is per-image latency. Then Allocations while scrolling the grid hard for about 20 s: memory should level off.
+- The 2-minute demo video, in a Release build (no ladybug menu):
+  1. 0:00 search screen; show the privacy note briefly
+  2. 0:15 a natural query ("photos from last summer") with the status lines
+  3. 0:35 results: summary, chips, grid
+  4. 0:50 remove a chip (instant, no model call), then change the radius or photos ↔ videos
+  5. 1:10 a tricky query ("two Christmases ago" or "fotos from whistlr last wintr")
+  6. 1:35 the eval scorecard: `evals/CHANGELOG.md` (76% → 98%, Haiku vs Sonnet)
+
+**Interview answer:** "What happens in your app when the provider is overloaded?" A 529 or `overloaded_error` is retryable, so the client retries up to 3 attempts with exponential backoff and jitter (1 s, then about 2 s), or waits as long as `retry-after` says. Each retry reaches the screen through a task-local observer: "Claude is busy. Retrying in 2 s (attempt 2 of 3)", not a silent spinner. If all three fail, the user sees "Claude Is Overloaded. Try again in a minute" with a Try Again button. The technical detail and request ID are under Details, and the failure is logged with its cost. Nothing waits forever, because the whole search has a 60-second limit, and Cancel stops a backoff immediately. Retries happen only before any output: for the streaming chat, a mid-stream error ends the stream instead of retrying, so text is never duplicated.
 
 ## Open items
 
