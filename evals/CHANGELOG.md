@@ -40,3 +40,24 @@ is a small sample.
 **What the improvements cost:** input tokens went from 4684 to 5319 per Haiku query (+14%)
 because of the longer system prompt. That's about $0.0006 per query, and prompt caching of
 the system prompt and tools would recover most of it.
+
+## Re-run with photo aliases (2026-10-23)
+
+Day 9 replaced photo IDs with short aliases (`p1`, `p2`, …) in what Claude sees, after
+Instruments on the iPhone showed it spending most of each search copying 30 long PhotoKit
+IDs. The prompt is unchanged (`6c1c47fd3a50`); this run checks that accuracy holds.
+
+| Run | Dev exact match (25 × 2) | Held-back (5 × 2) | Rounds | Tokens in / out | Latency avg / p95 (dev) | Cost per query (dev) | Results |
+|---|---|---|---|---|---|---|---|
+| Day 8, real IDs | 98.0% (24 / 1 / 0) | 100% (5 / 0 / 0) | 2.42 | 5319 / 264 | 3.52 s / 4.76 s | $0.0066 | `2026-10-02-1529-haiku-dev`, `2026-10-02-1531-haiku-test` |
+| Day 9, aliases | 100.0% (25 / 0 / 0) | 100% (5 / 0 / 0) | 2.48 | 5462 / 258 | 5.63 s / 7.71 s | $0.0067 | `2026-10-23-0837-haiku-dev`, `2026-10-23-0837-haiku-test` |
+
+Accuracy holds: every dev and held-back case passes on both runs, including `amb-03`
+(Springfield), which flaked on Day 8. One clean run doesn't prove that case is fixed; it's
+within the noise of 2 runs per case.
+
+The canned library's IDs were already short, so tokens and cost barely move here; the
+saving shows up only on a real library (on the iPhone: ~1,170 → ~350 output tokens and
+~15 s → ~6 s per search). Latency is higher than on Day 8 even though rounds and tokens are
+the same, so the difference is most likely the API's speed at the time of the run, not the
+change.

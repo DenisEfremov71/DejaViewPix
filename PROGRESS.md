@@ -2,9 +2,9 @@
 
 ## Current status
 
-**Day 9 🟡 hardening built, checked in the simulator and profiled on the iPhone (2026-10-22).** Still to do: the 2-minute demo video. Then **Day 10.**
+**Day 9 ✅ done (2026-10-23).** Hardening, Instruments on the iPhone (searches ~15 s → ~6 s with photo aliases) and the demo video. Next: **Day 10.**
 
-**Where we stopped (2026-10-22):** the Day 9 hardening is committed and pushed (`d5ebc06`). Instruments on the iPhone found that Claude spent most of each search copying long PhotoKit IDs, so `search_photos` now gives it short aliases (`p1`, `p2`, …): searches went from ~15 s to ~6 s. The alias fix and these notes are committed and pushed. Still to do: the user records the demo video (shot list in the Day 9 section below). When resuming: ask about the video, then start Day 10.
+**Where we stopped (2026-10-23):** Day 9 is finished; the user recorded the 2-minute demo on the iPhone (Release build, the scorecard shot from a one-page HTML made from `evals/CHANGELOG.md`). Day 10 started: the evals re-ran with photo aliases on 2026-10-23 (Haiku dev 100%, held-back 5/5, $0.0067 per query; see `evals/CHANGELOG.md`). README rewritten (pitch, numbers, Mermaid diagrams, privacy, how to run, evals, decisions) with `docs/demo.gif`, 10 s of the Tokyo search cut from a QuickTime recording of the iPhone with AVFoundation/ImageIO (no ffmpeg). Still to do: a secret scan of the git history, a license, making the repo public, write-up #1 and the LinkedIn post.
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 
@@ -318,7 +318,7 @@ The filters shown to the user are rebuilt from the tool calls that ran, not take
 
 **Interview answer:** "How did you decide which model to ship?" With numbers from the same evals, on the same prompt. I first improved the prompt on the cheap model, one change at a time, from 76% to 98%. Then I ran both models: Haiku 98% at $0.0066 per query with a 4.8 s p95, Sonnet 100% at $0.0156 with an 8.6 s p95. The remaining gap is one run of one genuinely ambiguous query, and the held-back cases pass on both. So Sonnet would buy almost nothing users would notice, at 2.4× the cost and slower searches, which they would notice. I shipped Haiku and kept the eval suite, so if a larger dataset ever shows a real gap, switching is one enum case and a re-run.
 
-## Day 9: Hardening and the demo (in progress, 2026-10-02)
+## Day 9: Hardening and the demo (done 2026-10-23)
 
 **Built**
 - Package:
@@ -379,8 +379,8 @@ The first Time Profiler run showed 14–21 s per search with the CPU almost idle
 
 Tips: start with Product › Profile (⌘I) so Instruments gets a fresh Release build (its own Record button relaunches whatever is installed). Allocations needs Recording Mode "Immediate" to show Mark Generation while recording. Per-search log lines: Console.app, the iPhone, `process:DejaViewPix search`.
 
-**Still to do (on the iPhone)**
-- The 2-minute demo video, in a Release build (no ladybug menu):
+**Demo video (recorded 2026-10-23)**
+- 2 minutes on the iPhone, in a Release build (no ladybug menu), installed with `xcodebuild -configuration Release` and `xcrun devicectl device install app` so the scheme stayed unchanged. Shot list:
   1. 0:00 search screen; show the privacy note briefly
   2. 0:15 a natural query ("photos from last summer") with the status lines
   3. 0:35 results: summary, chips, grid
@@ -392,7 +392,6 @@ Tips: start with Product › Profile (⌘I) so Instruments gets a fresh Release 
 
 ## Open items
 
-- Re-run the dev evals with photo aliases (about $0.35) to confirm Haiku still scores 98%. The canned IDs were already short, so latency and cost there shouldn't change.
 - Multi-round searches (a named place: geocode, search, answer) take 9–13 s on the iPhone; each round is a full model call.
 
 - Haiku once read "last winter" as December 2024–February 2025 (on 2026-10-02 the answer is December 2025–February 2026); another run of the same query got it right. Covered by eval cases `rel-02`, `rel-03` and `typo-01`; one possible Day 8 fix is computing the season's dates in the system prompt.
