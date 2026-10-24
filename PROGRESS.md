@@ -4,7 +4,7 @@
 
 **Day 9 ✅ done (2026-10-23).** Hardening, Instruments on the iPhone (searches ~15 s → ~6 s with photo aliases) and the demo video. Next: **Day 10.**
 
-**Where we stopped (2026-10-23):** Day 9 is finished; the user recorded the 2-minute demo on the iPhone (Release build, the scorecard shot from a one-page HTML made from `evals/CHANGELOG.md`). Day 10 started: the evals re-ran with photo aliases on 2026-10-23 (Haiku dev 100%, held-back 5/5, $0.0067 per query; see `evals/CHANGELOG.md`). README rewritten (pitch, numbers, Mermaid diagrams, privacy, how to run, evals, decisions) with `docs/demo.gif`, 10 s of the Tokyo search cut from a QuickTime recording of the iPhone with AVFoundation/ImageIO (no ffmpeg). Still to do: a secret scan of the git history, a license, making the repo public, write-up #1 and the LinkedIn post.
+**Where we stopped (2026-10-23):** Day 9 is finished; the user recorded the 2-minute demo on the iPhone (Release build, the scorecard shot from a one-page HTML made from `evals/CHANGELOG.md`). Day 10 started: the evals re-ran with photo aliases on 2026-10-23 (Haiku dev 100%, held-back 5/5, $0.0067 per query; see `evals/CHANGELOG.md`). README rewritten (pitch, numbers, Mermaid diagrams, privacy, how to run, evals, decisions) with `docs/demo.gif`, 10 s of the Tokyo search cut from a QuickTime recording of the iPhone with AVFoundation/ImageIO (no ffmpeg). Secret scan of the whole history (23 commits, 2026-10-23): clean; no key patterns, `Secrets.xcconfig` never committed, the early xcconfig files held only an include and a placeholder. MIT license added. Still to do: making the repo public, write-up #1 and the LinkedIn post.
 
 ## Day 1: Project setup and first API call (done 2026-10-01)
 

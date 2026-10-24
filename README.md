@@ -227,3 +227,7 @@ history, with every change and its result files, is in [`evals/CHANGELOG.md`](ev
 - The API key lives on the device; see [Privacy](#privacy) for the production setup.
 - The eval set is small (30 cases), so a single run is worth 2 points; it shows the prompt
   reasons about dates and places, not that every phrasing works.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
